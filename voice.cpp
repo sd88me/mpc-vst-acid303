@@ -863,7 +863,7 @@ struct Voice::Impl {
 		for (int i = 0; i < 4; ++i)
 			un[i] = u[i] + h * ((23.0 / 12) * fPrev[i] - (16.0 / 12) * fPrev2[i] + (5.0 / 12) * fPrev3[i]);
 		const double hh = 0.5 * h;
-		double x = 0, tc[5];
+		double x = 0, tc[5], tAmp = 0;
 		bool converged = false;
 		for (int it = 0; it < 6; ++it) {
 			// The feedback amplifier's tanh with stages 1-3, then the input pair's with stage 4.
@@ -922,6 +922,8 @@ struct Voice::Impl {
 			// tanh at the updated state: after a converged step (|d| < 1e-10) the first-order
 			// correction is exact to well below double precision.
 			if (mx < vcfTol) {
+				// The output amplifier sees the same w as the feedback's tanh (tf).
+				tAmp = tf + (1 - tf * tf) * (aW * d[3] * kInv2Vt);
 				tc[0] = t0;
 				tc[1] = t1 + (1 - t1 * t1) * ((d[0] - d[1]) * kInv2Vt);
 				tc[2] = t2 + (1 - t2 * t2) * ((d[1] - d[2]) * kInv2Vt);
@@ -951,7 +953,7 @@ struct Voice::Impl {
 		for (int i = 0; i < 4; ++i)
 			u[i] = un[i];
 		const double w = hpC25.process(u[3]);
-		const double amp = ampGain * fastTanh(w * kInv2Vt);
+		const double amp = ampGain * (converged ? tAmp : fastTanh(w * kInv2Vt));
 		vcfOut = hpC14.process(amp);
 		vcfWiper = resWiper * vcfOut;
 		const double q18 = hpC15.process(vcfWiper);
