@@ -15,7 +15,11 @@ volatile int g_n = 0;
 void onProf(int, siginfo_t *, void *ctx)
 {
 	if (g_n < kMax)
+#if defined(__arm__)
 		g_pcs[g_n++] = static_cast<ucontext_t *>(ctx)->uc_mcontext.arm_pc;
+#else
+		g_pcs[g_n++] = static_cast<ucontext_t *>(ctx)->uc_mcontext.gregs[REG_RIP];
+#endif
 }
 
 struct Profiler {

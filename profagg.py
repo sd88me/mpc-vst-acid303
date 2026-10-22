@@ -9,7 +9,8 @@ nl = int(sys.argv[4]) if len(sys.argv) > 4 else 30
 only = sys.argv[5] if len(sys.argv) > 5 else None  # restrict the line table to one outermost function
 rows = [l.split() for l in open(prof)]
 addrs = [a for _, a in rows]
-out = subprocess.run(['arm-linux-gnueabihf-addr2line', '-i', '-f', '-C', '-a', '-e', binary] + addrs,
+tool = 'addr2line' if len(sys.argv) > 6 and sys.argv[6] == 'x86' else 'arm-linux-gnueabihf-addr2line'
+out = subprocess.run([tool, '-i', '-f', '-C', '-a', '-e', binary] + addrs,
                      capture_output=True, text=True).stdout.split('\n')
 chains, cur = {}, None
 for line in out:

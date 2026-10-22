@@ -122,9 +122,11 @@ private:
 	bool m_needsReset = false, m_inWarmup = false;
 	double m_hostRate = 44100, m_rate = 176400;
 	int m_factor = 4;
-	// Adaptive control rate (render): every host sample for m_fastMs after the CPU lines change,
-	// otherwise every m_ctlDiv host samples.
+	// Adaptive control rate (render): every host sample for m_fullMs after the CPU lines change,
+	// every other one to m_fastMs, otherwise every m_ctlDiv host samples.
 	int m_ctlDiv = 4;
+	double m_fullMs = 25;
+	int m_fastTotal = 0, m_fullSamples = 0;
 	// The VCF/VCA run at the lowest power-of-two multiple of the host rate at or above this
 	// (the VCO stays at 352.8/384 kHz): 176 kHz is Lemus's 4x; 88 kHz (2x, with the ladder
 	// prewarped) is within 0.25 dB of it per frame at about 80 % of the cost.

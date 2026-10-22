@@ -179,10 +179,17 @@ double junctionExpm1(double a)
 	return a < -40 ? -1.0 : fastExpm1(std::min(a, 40.0));
 }
 
-// d/da of junctionExpm1(a): exp(a), zero where junctionExpm1 is flat (below -40, above 40).
-double junctionSlope(double a)
+// junctionExpm1(a) and its slope d/da (exp(a), zero where it is flat: below -40, above 40),
+// from one exponential.
+double junction(double a, double &slope)
 {
-	return a < -40 || a > 40 ? 0.0 : fastExp(a);
+	if (a < -40) {
+		slope = 0;
+		return -1;
+	}
+	const double e = fastExp(std::min(a, 40.0));
+	slope = a > 40 ? 0.0 : e;
+	return e - 1;
 }
 
 // (1 + p)^(-1/n) for p >= 0: the binomial series to p^5 while p < 0.02 (relative error under
@@ -971,9 +978,10 @@ struct Voice::Impl {
 						}
 					}
 					const double aE = (x - vE) / kVt, aC = (x - c42) / kVt;
-					const double iB = is / bf * junctionExpm1(aE) + is / br * junctionExpm1(aC);
+					double sE, sC;
+					const double iB = is / bf * junction(aE, sE) + is / br * junction(aC, sC);
 					if (dIB != nullptr)
-						*dIB = (is / bf * junctionSlope(aE) + is / br * junctionSlope(aC)) / kVt;
+						*dIB = (is / bf * sE + is / br * sC) / kVt;
 					return x - vb32 - dt / 0.1e-6 * (i134 - iB);
 				};
 				double dIB = 0;
@@ -999,9 +1007,10 @@ struct Voice::Impl {
 			const double iCC = is * junctionExpm1((vb32 - vE) / kVt);
 			const auto iC32 = [&](double vN, double &dI) {
 				const double aEC = (vb32 - vN) / kVt;
-				const double iEC = is * junctionExpm1(aEC);
+				double sEC;
+				const double iEC = is * junction(aEC, sEC);
 				const double i = iCC - iEC * (1 + 1 / br);
-				const double di = (1 + 1 / br) * is * junctionSlope(aEC) / kVt;
+				const double di = (1 + 1 / br) * is * sEC / kVt;
 				const double iR = std::max(vN - vE, 0.0) / 200 + 1e-12;
 				const double diR = vN > vE ? 1 / 200.0 : 0.0;
 				if (i > 0) {
@@ -1062,8 +1071,9 @@ struct Voice::Impl {
 			const double vP = vj + 450 * i + cal.pin1ShiftV;
 			const double dvP = 1 + 450 * di;
 			const double aEC = (vP - c42) / kVt;
-			iEC = is31 * junctionExpm1(aEC);
-			const double diEC = is31 * junctionSlope(aEC) / kVt * dvP;
+			double sEC;
+			iEC = is31 * junction(aEC, sEC);
+			const double diEC = is31 * sEC / kVt * dvP;
 			iC = (iE + iEC) / (1 + 1 / bf31) - iEC * (1 + 1 / br31);
 			double diD = 0;
 			const double drive = c36 - vP;
@@ -1099,10 +1109,8 @@ struct Voice::Impl {
 			const bool done = std::abs(next - vj) < pin1Tol;
 			vj = next;
 			if (done || hi - lo < pin1Tol)
-				break;
+				break; // iC, iD, iEC stand from the last evaluation, within pin1Tol of vj
 		}
-		double slope;
-		f(vj, slope);
 		pin1Vj = vj;
 		iVeg = iC;
 		iAcc = iD;
@@ -1194,6 +1202,8 @@ void Voice::prepare(double hostRate)
 		m_ctlDiv = std::max(1, atoi(e));
 	if (const char *e = getenv("TB_FASTMS"))
 		m_fastMs = atof(e);
+	if (const char *e = getenv("TB_FULLMS"))
+		m_fullMs = atof(e);
 	int stages = 0;
 	const double minRate = getenv("TB_MIN") ? atof(getenv("TB_MIN")) : m_minInternalRate;
 	while (stages < 3 && hostRate * (1 << stages) < minRate)
@@ -1222,7 +1232,9 @@ void Voice::reset()
 	m_impl->setRates(rate, host);
 	m_ctlPhase = 0;
 	m_curDiv = 1;
-	m_fastLeft = int(m_fastMs * 1e-3 * m_hostRate);
+	m_fastTotal = int(m_fastMs * 1e-3 * m_hostRate);
+	m_fullSamples = int(m_fullMs * 1e-3 * m_hostRate);
+	m_fastLeft = m_fastTotal;
 	m_decimator.reset();
 	m_lines = CpuLines();
 	m_retrigger = false;
@@ -1240,7 +1252,7 @@ void Voice::setLines(const CpuLines &lines, unsigned triggers)
 	if (triggers != m_triggers && lines.gate && m_lines.gate && !lines.slide)
 		m_retrigger = true;
 	if (m_retrigger || lines.gate != m_lines.gate || lines.accent != m_lines.accent || lines.slide != m_lines.slide)
-		m_fastLeft = int(m_fastMs * 1e-3 * m_hostRate);
+		m_fastLeft = m_fastTotal;
 	m_triggers = triggers;
 	m_lines = lines;
 }
@@ -1273,12 +1285,12 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 	const bool square = k.square;
 	const double slideStep = 1 - fastExp(-v.hv / 22e-3);
 	for (int s = 0; s < n; ++s) {
-		// Adaptive control rate: every host sample for a while after the CPU lines change
+		// Adaptive control rate: every host sample for m_fullMs after the CPU lines change
 		// (note start, accent, release: the gate conditioning, VCA and accent circuits move
-		// within milliseconds there), otherwise every m_ctlDiv samples, with the ladder and VCA
-		// currents interpolated across the step as before.
+		// within milliseconds there), every other one to m_fastMs, then every m_ctlDiv-th, with
+		// the ladder and VCA currents interpolated across the step as before.
 		if (m_ctlPhase == 0) {
-			m_curDiv = m_fastLeft > 0 ? 1 : m_ctlDiv;
+			m_curDiv = m_fastLeft <= 0 ? m_ctlDiv : m_fastTotal - m_fastLeft < m_fullSamples ? 1 : 2;
 			v.hc = m_curDiv / m_hostRate;
 			v.controlStep(k, m_lines, m_retrigger);
 			m_retrigger = false;
