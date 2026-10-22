@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Draws Model-303's MPC skin for the MPC's 1280x628 plugin area: a silver panel in the manner of the modded 303 clones
 (the TD-3-MO's knobs, bat toggles, red buttons and lettering as the reference), drawn from scratch -- no photo, no maker's
-name or mark -- in Barlow Semi Condensed (SIL OFL, skin/assets/).
+name or mark -- in the Acid plugin's label face, Univers 53 Extended (skin/assets/).
 
     python3 skin/make_skin.py vst/          # -> vst/art/*.png, vst/layout.conf, vst/preview/*.png
 
@@ -30,11 +30,19 @@ SWEEP = 300                # a pot's travel in degrees (-150 .. +150)
 FONTS = {}
 
 
+LABEL_FONT = "Univers_53_Extended_Regular.otf"   # the Acid plugin's label face; one weight, emboldened by a stroke
+SCALE = 0.78                                      # it runs wide: sizes are given for a semi-condensed face
+
+
 def font(size, weight="SemiBold"):
-    k = (size, weight)
+    k = size
     if k not in FONTS:
-        FONTS[k] = ImageFont.truetype(os.path.join(A, "BarlowSemiCondensed-%s.ttf" % weight), int(round(size * SS)))
+        FONTS[k] = ImageFont.truetype(os.path.join(A, LABEL_FONT), int(round(size * SCALE * SS)))
     return FONTS[k]
+
+
+def stroke(weight):
+    return {"Medium": 0, "SemiBold": int(0.35 * SS), "Bold": int(0.7 * SS)}.get(weight, 0)
 
 
 def even(x):
@@ -153,8 +161,10 @@ class Tab:
 
     def text(self, x, y, s, size=17, weight="SemiBold", fill=INK, anchor="mm"):
         # printed into the metal: a faint light edge below the ink
-        self.draw.text((x * SS, (y + 0.9) * SS), s, font=font(size, weight), fill=(255, 255, 255, 120), anchor=anchor)
-        self.draw.text((x * SS, y * SS), s, font=font(size, weight), fill=fill, anchor=anchor)
+        sw = stroke(weight)
+        self.draw.text((x * SS, (y + 0.9) * SS), s, font=font(size, weight), fill=(255, 255, 255, 120), anchor=anchor,
+                       stroke_width=sw, stroke_fill=(255, 255, 255, 120))
+        self.draw.text((x * SS, y * SS), s, font=font(size, weight), fill=fill, anchor=anchor, stroke_width=sw, stroke_fill=fill)
 
     def line(self, x0, y0, x1, y1, w=2, fill=INK, engraved=True):
         if engraved:
