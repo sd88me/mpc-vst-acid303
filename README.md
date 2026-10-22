@@ -67,6 +67,13 @@ What was changed, all in `src/lemus/` (the git history has one commit per step):
 - **Leaner downsampling:** shorter oscillator downsampling filters, with a delay that keeps the original's timing
   between oscillator and envelopes.
 
+**CPU rating: WARN** (the repo's `tools/bench.sh`, on a Force, ECO, one instance, 44.1 kHz). Steady playing is about
+19% of an audio block on average and 28–34% at the 99th percentile, which is the WARN band (p99 up to 35%): one or two
+instances alongside a normal project, not a stack of them. An idle instance costs under 2%, because the voice sleeps
+half a second after the last note. The bench's worst case, a random sweep of every control with all Devil Fish mods on
+and QUALITY flipping between HQ and ECO, reaches about 42–50% p99, over the WARN limit; ordinary use doesn't do that.
+HQ costs more again (about 43% of a core). If a project glitches, use ECO and fewer instances.
+
 Gen2 devices (MPC Live III, Key 37 and other aarch64 models) are faster and run **HQ**, the original's full 4×, by
 default.
 
