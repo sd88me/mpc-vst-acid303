@@ -35,9 +35,18 @@ int keyIndex(const char *k)
 }
 
 struct Inst {
-	tb303::Voice voice;
+	// Both qualities are prepared at creation and QUALITY only picks which one renders: re-preparing a voice
+	// renders its 0.6 s of warm-up, far too long for a switch (or a Q-Link sweep) on the audio thread's lock.
+	tb303::Voice voices[2];     // [0] HQ (Lemus's 4x), [1] ECO (2x, the prewarped ladder)
+	tb303::Voice *voice = &voices[1];
 	float vals[NPARAMS];
-	double internalMin = 0; // the internal rate prepare() was given for (quality)
+
+	// The voice sleeps (renders zeros) once its gate has been off and it has been silent for kSleepBlocks: it is a
+	// full circuit simulation even when idle. A note, or any control change, wakes it.
+	static constexpr float kSilence = 1e-6f;                // -120 dB
+	static constexpr int kSleepBlocks = 44100 / 128 / 2;    // 0.5 s: past the longest tail
+	bool asleep = false;
+	int quietBlocks = 0;
 
 	// MIDI to the CPU lines (tb303::MidiDriver's rules, fixed storage: nothing allocates on the audio thread)
 	tb303::CpuLines lines;
@@ -50,6 +59,10 @@ struct Inst {
 
 	Inst()
 	{
+		voices[0].setMinInternalRate(176000);
+		voices[1].setMinInternalRate(88000);
+		for (auto &v : voices)
+			v.prepare(kHostRate);
 		for (int i = 0; i < NPARAMS; ++i) {
 			const param_t &p = PARAMS[i];
 			vals[i] = p.nopts ? std::round(p.def * (p.nopts - 1)) : p.min + p.def * (p.max - p.min);
@@ -65,15 +78,11 @@ struct Inst {
 		// AUTO: the 2x VCF/VCA on the armhf (Gen1) devices, Lemus's 4x on aarch64 (Gen2)
 		const int q = opt("quality"); // HQ, AUTO, ECO (top to bottom on the panel's switch)
 #if defined(__aarch64__)
-		const double rate = q == 2 ? 88000 : 176000;
+		const bool hq = q != 2;       // AUTO: Lemus's 4x on the faster Gen2 devices
 #else
-		const double rate = q == 0 ? 176000 : 88000;
+		const bool hq = q == 0;       // AUTO: the 2x on Gen1 (docs: a third of a core)
 #endif
-		if (rate != internalMin) {
-			internalMin = rate;
-			voice.setMinInternalRate(rate);
-			voice.prepare(kHostRate);
-		}
+		voice = &voices[hq ? 0 : 1];
 		tb303::Controls c;
 		c.tuning = 0.5 + val("tune") / 1400.0; // the knob spans +/-700 cents (service notes)
 		c.cutoff = val("cutoff") / 10;
@@ -97,7 +106,8 @@ struct Inst {
 		c.muffler = 2 - opt("muffler");
 		c.subOsc = opt("sub_osc") == 1 ? 3 - opt("sub_level") : 0;
 		c.waveOff = opt("vco") == 1;
-		voice.setControls(c);
+		for (auto &v : voices)
+			v.setControls(c);
 		sendLines();
 	}
 
@@ -105,7 +115,10 @@ struct Inst {
 	{
 		tb303::CpuLines l = lines;
 		l.accent = l.accent || opt("accent_hold") == 1;
-		voice.setLines(l, triggers);
+		for (auto &v : voices)
+			v.setLines(l, triggers);
+		asleep = false;
+		quietBlocks = 0;
 	}
 
 	void noteOn(int note, int vel)
@@ -258,7 +271,16 @@ void render(void *e, int16_t *out, int frames)
 {
 	Inst &t = *static_cast<Inst *>(e);
 	frames = std::min(frames, 128);
-	t.voice.render(t.mono, frames);
+	if (t.asleep) {
+		memset(out, 0, sizeof(int16_t) * 2 * size_t(frames));
+		return;
+	}
+	t.voice->render(t.mono, frames);
+	float peak = 0;
+	for (int i = 0; i < frames; ++i)
+		peak = std::max(peak, std::fabs(t.mono[i]));
+	t.quietBlocks = (peak < Inst::kSilence && !t.lines.gate) ? t.quietBlocks + 1 : 0;
+	t.asleep = t.quietBlocks >= Inst::kSleepBlocks;
 	for (int i = 0; i < frames; ++i) {
 		const float s = std::clamp(t.mono[i], -1.0f, 1.0f) * 32767.0f;
 		out[2 * i] = out[2 * i + 1] = int16_t(std::lrint(s));
