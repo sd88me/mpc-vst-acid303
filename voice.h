@@ -121,8 +121,11 @@ private:
 	bool m_needsReset = false, m_inWarmup = false;
 	double m_hostRate = 44100, m_rate = 176400;
 	int m_factor = 4;
-	int m_ctlDiv = 1;   // host samples per control step
-	int m_ctlPhase = 0;
+	// Adaptive control rate (render): every host sample for m_fastMs after the CPU lines change,
+	// otherwise every m_ctlDiv host samples.
+	int m_ctlDiv = 4;
+	double m_fastMs = 40;
+	int m_ctlPhase = 0, m_curDiv = 1, m_fastLeft = 0;
 	Decimator m_decimator;
 	std::vector<float> m_work;
 	std::unique_ptr<Impl> m_impl;

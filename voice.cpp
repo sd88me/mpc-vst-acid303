@@ -233,8 +233,7 @@ struct Voice::Impl {
 	// ------------------------------------------------------------------ constants
 	double fs = 176400, h = 1 / 176400.0; // internal rate
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
-	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host / ctlDiv)
-	int ctlDiv = 1;                          // host samples per control step
+	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host), and the current control step (s)
 	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
 	double pin1Tol = getenv("TB_P1TOL") ? atof(getenv("TB_P1TOL")) : 1e-9; // its Newton tolerance (V): 4e-8 of the current
 	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
@@ -349,7 +348,7 @@ struct Voice::Impl {
 		h = 1 / fs;
 		fsv = 2 * fs;
 		hv = 1 / fsv;
-		fsc = host / ctlDiv;
+		fsc = host;
 		hc = 1 / fsc;
 		vcoDown.setStages(1);
 		hpC14.set(1 / (2 * kPi * 1e-6 * 50e3), fs);           // 3.2 Hz
@@ -1143,6 +1142,8 @@ void Voice::prepare(double hostRate)
 	m_hostRate = hostRate;
 	if (const char *e = getenv("TB_CTL"))
 		m_ctlDiv = std::max(1, atoi(e));
+	if (const char *e = getenv("TB_FASTMS"))
+		m_fastMs = atof(e);
 	int stages = 0;
 	const double minRate = getenv("TB_MIN") ? atof(getenv("TB_MIN")) : 176000;
 	while (stages < 3 && hostRate * (1 << stages) < minRate)
@@ -1152,7 +1153,6 @@ void Voice::prepare(double hostRate)
 	m_decimator.setStages(stages);
 	m_work.assign(size_t(m_factor), 0.0f);
 	m_impl->cal = m_cal;
-	m_impl->ctlDiv = m_ctlDiv;
 	m_impl->setRates(m_rate, hostRate);
 	reset();
 }
@@ -1169,9 +1169,10 @@ void Voice::reset()
 	const double rate = m_rate, host = m_hostRate;
 	*m_impl = Impl();
 	m_impl->cal = cal;
-	m_impl->ctlDiv = m_ctlDiv;
 	m_impl->setRates(rate, host);
 	m_ctlPhase = 0;
+	m_curDiv = 1;
+	m_fastLeft = int(m_fastMs * 1e-3 * m_hostRate);
 	m_decimator.reset();
 	m_lines = CpuLines();
 	m_retrigger = false;
@@ -1188,6 +1189,8 @@ void Voice::setLines(const CpuLines &lines, unsigned triggers)
 {
 	if (triggers != m_triggers && lines.gate && m_lines.gate && !lines.slide)
 		m_retrigger = true;
+	if (m_retrigger || lines.gate != m_lines.gate || lines.accent != m_lines.accent || lines.slide != m_lines.slide)
+		m_fastLeft = int(m_fastMs * 1e-3 * m_hostRate);
 	m_triggers = triggers;
 	m_lines = lines;
 }
@@ -1219,16 +1222,23 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 	v.setVolume(k.volume);
 	const bool square = k.square;
 	const double slideStep = 1 - fastExp(-v.hv / 22e-3);
-	const int div = v.ctlDiv;
-	const double fracStep = 1.0 / (div * m_factor);
 	for (int s = 0; s < n; ++s) {
+		// Adaptive control rate: every host sample for a while after the CPU lines change
+		// (note start, accent, release: the gate conditioning, VCA and accent circuits move
+		// within milliseconds there), otherwise every m_ctlDiv samples, with the ladder and VCA
+		// currents interpolated across the step as before.
 		if (m_ctlPhase == 0) {
+			m_curDiv = m_fastLeft > 0 ? 1 : m_ctlDiv;
+			v.hc = m_curDiv / m_hostRate;
 			v.controlStep(k, m_lines, m_retrigger);
 			m_retrigger = false;
 		}
+		if (m_fastLeft > 0)
+			--m_fastLeft;
+		const double fracStep = 1.0 / (m_curDiv * m_factor);
 		const double lnPrev = v.lnIfPrev, lnNow = v.lnIfNow;
 		const int base = m_ctlPhase * m_factor;
-		if (++m_ctlPhase == div)
+		if (++m_ctlPhase == m_curDiv)
 			m_ctlPhase = 0;
 		for (int j = 0; j < m_factor; ++j) {
 			const double frac = (base + j + 1) * fracStep;
