@@ -73,9 +73,9 @@
    "key": "quality",
    "name": "Quality",
    "options": [
+    "HQ",
     "AUTO",
-    "ECO",
-    "HQ"
+    "ECO"
    ],
    "default": "AUTO"
   },
@@ -151,9 +151,9 @@
    "key": "accent_sweep",
    "name": "Accent Sweep",
    "options": [
-    "0",
+    "2",
     "1",
-    "2"
+    "0"
    ],
    "default": "2"
   },
@@ -161,9 +161,9 @@
    "key": "muffler",
    "name": "Muffler",
    "options": [
-    "0",
+    "2",
     "1",
-    "2"
+    "0"
    ],
    "default": "0"
   },
@@ -180,9 +180,9 @@
    "key": "sub_level",
    "name": "Sub Level",
    "options": [
-    "LOW",
+    "HIGH",
     "MID",
-    "HIGH"
+    "LOW"
    ],
    "default": "MID"
   },

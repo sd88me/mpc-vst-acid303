@@ -63,11 +63,11 @@ struct Inst {
 	void apply()
 	{
 		// AUTO: the 2x VCF/VCA on the armhf (Gen1) devices, Lemus's 4x on aarch64 (Gen2)
-		const int q = opt("quality");
+		const int q = opt("quality"); // HQ, AUTO, ECO (top to bottom on the panel's switch)
 #if defined(__aarch64__)
-		const double rate = q == 1 ? 88000 : 176000;
+		const double rate = q == 2 ? 88000 : 176000;
 #else
-		const double rate = q == 2 ? 176000 : 88000;
+		const double rate = q == 0 ? 176000 : 88000;
 #endif
 		if (rate != internalMin) {
 			internalMin = rate;
@@ -92,9 +92,10 @@ struct Inst {
 		c.slideTime = val("slide_time") / 10;
 		c.filterFM = val("filter_fm") / 10;
 		c.sweepSpeed = opt("sweep_speed");
-		c.accentSweep = opt("accent_sweep");
-		c.muffler = opt("muffler");
-		c.subOsc = opt("sub_osc") == 1 ? 1 + opt("sub_level") : 0;
+		// the three-way switches' options run top to bottom as on the panel: 2, 1, 0 and HIGH, MID, LOW
+		c.accentSweep = 2 - opt("accent_sweep");
+		c.muffler = 2 - opt("muffler");
+		c.subOsc = opt("sub_osc") == 1 ? 3 - opt("sub_level") : 0;
 		c.waveOff = opt("vco") == 1;
 		voice.setControls(c);
 		sendLines();

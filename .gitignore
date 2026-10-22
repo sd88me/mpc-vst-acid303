@@ -3,3 +3,4 @@ tools/voicetest/tbtest-arm
 tools/voicetest/out/
 vst/build/
 vst/build/
+skin/__pycache__/

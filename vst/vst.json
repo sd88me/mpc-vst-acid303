@@ -3,7 +3,10 @@
   "vendor": "sd88me",
   "uid": "M303",
   "version": 1000,
-  "targets": ["armv7", "aarch64"],
+  "targets": [
+    "armv7",
+    "aarch64"
+  ],
   "so": "model303.so",
   "params": "params.json",
   "build": {
@@ -13,8 +16,22 @@
       "src/lemus/voice.cpp",
       "src/lemus/oversampler.cpp"
     ],
-    "cflags": ["-Isrc/lemus", "-O3", "-std=gnu++17", "-ffast-math", "-fno-finite-math-only"],
-    "cflags_arm": ["-mcpu=cortex-a17", "-mfpu=neon-vfpv4"],
-    "libs": ["-lm"]
-  }
+    "cflags": [
+      "-Isrc/lemus",
+      "-O3",
+      "-std=gnu++17",
+      "-ffast-math",
+      "-fno-finite-math-only"
+    ],
+    "cflags_arm": [
+      "-mcpu=cortex-a17",
+      "-mfpu=neon-vfpv4"
+    ],
+    "libs": [
+      "-lm"
+    ]
+  },
+  "layout": "layout.conf",
+  "art": "html",
+  "tile": "art/tile.png"
 }
