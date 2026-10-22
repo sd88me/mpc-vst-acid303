@@ -244,7 +244,7 @@ struct Voice::Impl {
 	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-2; // a step this small leaves ~1e-5 V (quadratic)
 	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
 	double pin1Tol = getenv("TB_P1TOL") ? atof(getenv("TB_P1TOL")) : 1e-9; // its Newton tolerance (V): 4e-8 of the current
-	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
+	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-5; // Newton step that ends the VCF iteration (V): the
 	                                                                           // first-order tanh correction leaves O(1e-12)
 	Calibration cal;
 
@@ -293,7 +293,8 @@ struct Voice::Impl {
 	double T[5] = {0, 0, 0, 0, 0};
 	double xPrev = 0;
 	double fPrev[4] = {0, 0, 0, 0};
-	double fPrev2[4] = {0, 0, 0, 0}; // the step before's, for the Newton start
+	double fPrev2[4] = {0, 0, 0, 0}; // the steps before's, for the Newton start
+	double fPrev3[4] = {0, 0, 0, 0};
 	double ifPrev = 10e-6, ifNow = 10e-6; // ladder current, interpolated per sample
 	double lnIfPrev = std::log(10e-6), lnIfNow = std::log(10e-6); // and its log (render interpolates that)
 	HighPass hpC25;  // ladder top -> Q21 bases (in loop)
@@ -840,11 +841,11 @@ struct Voice::Impl {
 		constexpr double div = 2.2 / 12.2;
 		const double A = div * a23 * loopFollower * a15 * resWiper * a14 * ampGain;
 		const double B = div * (a23 * loopFollower * (a15 * resWiper * b14 + b15) + b23);
-		// Trapezoidal step, Newton on u1..u4, starting from an Adams-Bashforth step (about one
-		// iteration fewer than starting from u; the tolerance is the same).
+		// Trapezoidal step, Newton on u1..u4, starting from a third-order Adams-Bashforth step
+		// (one iteration does for ~90 % of steps at 2x).
 		double un[4];
 		for (int i = 0; i < 4; ++i)
-			un[i] = u[i] + h * (1.5 * fPrev[i] - 0.5 * fPrev2[i]);
+			un[i] = u[i] + h * ((23.0 / 12) * fPrev[i] - (16.0 / 12) * fPrev2[i] + (5.0 / 12) * fPrev3[i]);
 		const double hh = 0.5 * h;
 		double x = 0, tc[5];
 		bool converged = false;
@@ -923,8 +924,10 @@ struct Voice::Impl {
 			tc[4] = fastTanh(un[3] * kInv2Vt);
 		}
 		const double t0 = tc[0], t1 = tc[1], t2 = tc[2], t3 = tc[3], t4 = tc[4];
-		for (int i = 0; i < 4; ++i)
+		for (int i = 0; i < 4; ++i) {
+			fPrev3[i] = fPrev2[i];
 			fPrev2[i] = fPrev[i];
+		}
 		fPrev[0] = kc[0] * (t0 - t1);
 		fPrev[1] = kc[1] * (t1 - t2);
 		fPrev[2] = kc[2] * (t2 - t3);
