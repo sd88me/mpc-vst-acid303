@@ -18,6 +18,23 @@ struct Controls {
 	double accent = 0.5;
 	double volume = 0.7;
 	bool square = false;
+
+	// Devil Fish (Robin Whittle's mods, as in the TD-3-MO). Off: the TB-303, unchanged. On:
+	// DECAY sets the volume envelope (VEG) instead of the MEG, CUT OFF reaches about an
+	// octave further each way, ENV MOD has three times the range and goes to zero, and these:
+	bool devilFish = false;
+	double overdrive = 0;      // VCO level into the filter: 0 = normal (TD-3-MO), 1 = 66.6x
+	double slideTime = 0;      // 0 = the 303's 60 ms, 1 = 360 ms
+	double softAttack = 0.35;  // non-accented attack, 0.3 ms to 30 ms (exponential)
+	double normalDecay = 0.35; // MEG decay for normal notes, 30 ms to 3 s (exponential)
+	double accentDecay = 0.4;  // MEG decay for accented notes, 30 ms to 3 s
+	double filterTracking = 0; // filter follows the CV: up to 2.7 kHz per volt above ~2 V
+	double filterFM = 0;       // VCA output into the filter frequency
+	int accentSweep = 2;       // 0: no accent sweep + high resonance, 1: sweep + high resonance, 2: normal
+	int sweepSpeed = 1;        // 0 fast, 1 normal (the 303's), 2 slow
+	int muffler = 0;           // 0 off, 1, 2: soft clipping of the VCA output
+	bool waveOff = false;      // TD-3-MO: VCO off (sub oscillator / self-oscillation only)
+	int subOsc = 0;            // TD-3-MO: sub oscillator (square, an octave down): 0 off, 1 low, 2 mid, 3 high
 };
 
 // Unit-to-unit and calibration constants: the trimmers and the parts whose values the

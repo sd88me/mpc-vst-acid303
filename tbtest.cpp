@@ -16,7 +16,16 @@ static std::vector<float> render(const Scenario &sc, double secs = 6)
 {
 	Voice v;
 	v.prepare(48000);
-	v.setControls(sc.c);
+	Controls c0 = sc.c;
+	if (getenv("TB_DF")) {
+		// time mode with the Devil Fish on and its audio-rate mods in use
+		c0.devilFish = true;
+		c0.filterFM = 0.4;
+		c0.overdrive = 0.3;
+		c0.muffler = 1;
+		c0.subOsc = 1;
+	}
+	v.setControls(c0);
 	const int n = int(secs * 48000), blk = 128, stepLen = 48000 / 8; // 16ths at 120 BPM
 	std::vector<float> out(n);
 	CpuLines l;
@@ -36,7 +45,7 @@ static std::vector<float> render(const Scenario &sc, double secs = 6)
 			v.setLines(l, trig);
 		}
 		if (sc.pattern == 2) { // knob sweeps
-			Controls c = sc.c;
+			Controls c = c0;
 			const double t = double(p) / n;
 			c.cutoff = 0.5 + 0.5 * std::sin(6.28 * t * 3);
 			c.envMod = t;
@@ -280,6 +289,139 @@ int main(int argc, char **argv)
 				}
 				printf("%s note %d (%.0f Hz): inharmonic %.1f dB\n", sq ? "square" : "saw   ", note, f0, 10 * std::log10(rest / (harm + rest)));
 			}
+		return 0;
+	}
+	if (mode == "df") {
+		// Devil Fish behaviour against the manual's figures, through the probes.
+		const auto note = [](Controls c, int noteNum, bool accent, double secs, auto &&each) {
+			Voice v;
+			v.prepare(48000);
+			v.setControls(c);
+			CpuLines l;
+			l.note = noteNum;
+			l.gate = true;
+			l.accent = accent;
+			v.setLines(l, 1);
+			float buf[48];
+			for (int i = 0; i < int(secs * 1000); ++i) {
+				v.render(buf, 48);
+				each(i * 1e-3, v.probe(), buf);
+			}
+		};
+		Controls base;
+		base.devilFish = true;
+		base.resonance = 0;
+		// VEG: time from peak to 10 % (DECAY first half), level held (second half)
+		for (double d : {0.0, 0.25, 0.49, 0.75, 1.0}) {
+			Controls c = base;
+			c.decay = d;
+			double peak = 0, t10 = -1, last = 0;
+			note(c, 36, false, 5, [&](double t, const Voice::Probe &p, float *) {
+				if (p.veg > peak)
+					peak = p.veg;
+				else if (t10 < 0 && p.veg < 0.1 * peak)
+					t10 = t;
+				last = p.veg;
+			});
+			printf("VEG decay %.2f: to 10%% %s%.0f ms, level after 5 s %.0f %%\n", d, t10 < 0 ? ">" : "", (t10 < 0 ? 5 : t10) * 1e3, 100 * last / peak);
+		}
+		// MEG: normal and accent decay to 10 %
+		for (int acc = 0; acc < 2; ++acc)
+			for (double d : {0.0, 0.5, 1.0}) {
+				Controls c = base;
+				c.normalDecay = c.accentDecay = d;
+				double peak = 0, tp = 0, t10 = -1;
+				note(c, 36, acc, 6, [&](double t, const Voice::Probe &p, float *) {
+					if (p.meg > peak) {
+						peak = p.meg;
+						tp = t;
+					} else if (t10 < 0 && p.meg < 0.1 * peak)
+						t10 = t - tp;
+				});
+				printf("MEG %s decay %.1f: to 10%% %.0f ms\n", acc ? "accent" : "normal", d, t10 * 1e3);
+			}
+		// Soft attack: VCA current from gate to 90 %
+		for (double a : {0.0, 0.5, 1.0}) {
+			Controls c = base;
+			c.softAttack = a;
+			double t90 = -1;
+			double peak = 0;
+			note(c, 36, false, 0.2, [&](double, const Voice::Probe &p, float *) { peak = std::max(peak, p.veg); });
+			note(c, 36, false, 0.2, [&](double t, const Voice::Probe &p, float *) {
+				if (t90 < 0 && p.veg >= 0.9 * peak)
+					t90 = t;
+			});
+			printf("soft attack %.1f: VCA current to 90%% in %.1f ms\n", a, t90 * 1e3);
+		}
+		// Top of CUT OFF (ring at full resonance, no env mod), and filter tracking per volt
+		for (int df = 0; df < 2; ++df) {
+			Controls c;
+			c.devilFish = df;
+			c.cutoff = 1;
+			c.resonance = 1;
+			c.envMod = 0;
+			double hz = 0;
+			note(c, 36, false, 0.3, [&](double, const Voice::Probe &p, float *) { hz = p.vcfHz; });
+			printf("%s: cutoff max ring %.0f Hz", df ? "Devil Fish" : "TB-303   ", hz);
+			c.cutoff = 0;
+			note(c, 36, false, 0.3, [&](double, const Voice::Probe &p, float *) { hz = p.vcfHz; });
+			printf(", min %.0f Hz\n", hz);
+		}
+		{
+			Controls c = base;
+			c.cutoff = 0.5;
+			c.envMod = 0;
+			c.filterTracking = 1;
+			double h2 = 0, h3 = 0;
+			note(c, 36, false, 0.3, [&](double, const Voice::Probe &p, float *) { h2 = p.vcfHz; });
+			note(c, 48, false, 0.3, [&](double, const Voice::Probe &p, float *) { h3 = p.vcfHz; });
+			printf("filter tracking max: %.0f Hz/V (C2 %.0f Hz, C3 %.0f Hz)\n", h3 - h2, h2, h3);
+		}
+		// Slide time: 36 -> 48 with SLIDE, time to within 1 % of an octave in CV
+		for (double st : {0.0, 1.0}) {
+			Voice v;
+			v.prepare(48000);
+			Controls c = base;
+			c.slideTime = st;
+			v.setControls(c);
+			CpuLines l;
+			l.note = 36;
+			l.gate = true;
+			v.setLines(l, 1);
+			float buf[48];
+			for (int i = 0; i < 100; ++i)
+				v.render(buf, 48);
+			l.note = 48;
+			l.slide = true;
+			v.setLines(l, 1);
+			double t = -1;
+			for (int i = 0; i < 1000 && t < 0; ++i) {
+				v.render(buf, 48);
+				if (v.probe().cvVolts > 3.0 - 0.01)
+					t = i * 1e-3;
+			}
+			printf("slide time %.0f: %.0f ms to within 1%% of the octave\n", st, t * 1e3);
+		}
+		// Extremes: overdrive, FM, high resonance, muffler, sub: finite, bounded
+		for (int muf = 0; muf < 3; ++muf) {
+			Controls c = base;
+			c.overdrive = 1;
+			c.filterFM = 1;
+			c.resonance = 1;
+			c.accentSweep = 1;
+			c.accent = 1;
+			c.muffler = muf;
+			c.subOsc = 3;
+			double pk = 0;
+			bool finite = true;
+			note(c, 36, true, 2, [&](double, const Voice::Probe &, float *b) {
+				for (int i = 0; i < 48; ++i) {
+					finite &= std::isfinite(b[i]);
+					pk = std::max(pk, double(std::abs(b[i])));
+				}
+			});
+			printf("all at max, muffler %d: %s, peak %.2f\n", muf, finite ? "finite" : "NOT FINITE", pk);
+		}
 		return 0;
 	}
 	// time: all scenarios, report % of one core
