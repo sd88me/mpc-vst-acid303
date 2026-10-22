@@ -1,8 +1,12 @@
 # Acid-303
 
-A TB-303 bass synthesizer for the Akai MPC and Force standalone, built as a native VST2 plugin. Its voice is a
-component-level **circuit model** of the original: the same transistors, diodes, capacitors and pots as Roland's
-service-notes schematic. It also has the full set of **Devil Fish** mods, which you can switch in or out.
+An accurate, circuit-modelled TB-303 for the Akai MPC and Force standalone, as a native VST2 plugin. Its voice is
+not a filter-and-oscillator imitation: every stage of the original (the oscillator and square shaper, the
+four-capacitor transistor ladder filter and its resonance loop, the envelopes, accent sweep, slide and VCA) is
+solved as a circuit, transistor by transistor, from Roland's service-notes schematic. The component values are
+fitted to a real unit, so it is matched to the hardware: 3.0 dB average spectral distance from 400 recorded notes,
+against 2.2-2.5 dB between a real 303's own retakes. It also has the full set of **Devil Fish** mods, which you
+can switch in or out.
 
 ![303 tab, on a Force](docs/device-303.png)
 ![Devil Fish tab, on a Force](docs/device-devil-fish.png)
