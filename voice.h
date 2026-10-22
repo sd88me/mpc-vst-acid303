@@ -133,6 +133,7 @@ private:
 	double m_minInternalRate = 176000;
 	double m_fastMs = 40;
 	int m_ctlPhase = 0, m_curDiv = 1, m_fastLeft = 0;
+	double m_iF = 0, m_iFRatio = 1; // the ladder current through the control step
 	Decimator m_decimator;
 	std::vector<float> m_work;
 	std::unique_ptr<Impl> m_impl;

@@ -246,6 +246,7 @@ struct Voice::Impl {
 	double fs = 176400, h = 1 / 176400.0; // internal rate
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate: 352.8/384 kHz, 2x or 4x the internal rate
 	int vcoRatio = 2;
+	double vcaK1 = 0, vcaK2 = 0, vcaHc = 0; // vcaStep's series R-C branches (setRates)
 	bool warpOn = getenv("TB_WARP") ? atoi(getenv("TB_WARP")) != 0 : true;
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host), and the current control step (s)
 	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-2; // a step this small leaves ~1e-5 V (quadratic)
@@ -395,6 +396,12 @@ struct Voice::Impl {
 		hpC15.set(1 / (2 * kPi * 1e-6 * 98e3), fs);           // 1.6 Hz
 		hpC23.set(1 / (2 * kPi * 1e-6 * 12.2e3), fs);         // 13 Hz
 		hpOut.set(3.2, fs);
+		{
+			const double r1 = 220e3 + 2.2e3, r2 = 100e3 + 2.2e3, c = 10e-9;
+			vcaK1 = 1 / (r1 * (1 + h / (2 * r1 * c)));
+			vcaK2 = 1 / (r2 * (1 + h / (2 * r2 * c)));
+			vcaHc = h / c;
+		}
 		applyCalibration();
 	}
 
@@ -1126,13 +1133,11 @@ struct Voice::Impl {
 	{
 		// Two series R-C branches into R124 2.2k: VCF OUT via R121 220k + C21 10 nF, and the
 		// resonance wiper via R122 100k + C22 10 nF.
-		const double r1 = 220e3 + 2.2e3, r2 = 100e3 + 2.2e3, c = 10e-9;
-		// Trapezoidal series RC: i = (v - vc)/r, vc' = i/c
-		const double g1 = h / (2 * r1 * c), g2 = h / (2 * r2 * c);
-		const double i1 = (vcfOut - c21) / (r1 * (1 + g1));
-		const double i2 = (vcfWiper - c22) / (r2 * (1 + g2));
-		c21 += h / c * i1;
-		c22 += h / c * i2;
+		// Trapezoidal series RC: i = (v - vc)/r, vc' = i/c (vcaK1, vcaK2, vcaHc: setRates).
+		const double i1 = (vcfOut - c21) * vcaK1;
+		const double i2 = (vcfWiper - c22) * vcaK2;
+		c21 += vcaHc * i1;
+		c22 += vcaHc * i2;
 		const double vin = 2.2e3 * (i1 + i2);
 		// BA662 (tools/spice/ba662.lib: the chip as reverse engineered from an original, with its
 		// clones' data sheets): a bipolar pair into Wilson mirrors, output current
@@ -1296,17 +1301,20 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 			v.hc = m_curDiv / m_hostRate;
 			v.controlStep(k, m_lines, m_retrigger);
 			m_retrigger = false;
+			// The ladder current across the step, log-linear: a geometric sequence.
+			m_iF = fastExp(v.lnIfPrev);
+			m_iFRatio = fastExp((v.lnIfNow - v.lnIfPrev) / (m_curDiv * m_factor));
 		}
 		if (m_fastLeft > 0)
 			--m_fastLeft;
 		const double fracStep = 1.0 / (m_curDiv * m_factor);
-		const double lnPrev = v.lnIfPrev, lnNow = v.lnIfNow;
 		const int base = m_ctlPhase * m_factor;
 		if (++m_ctlPhase == m_curDiv)
 			m_ctlPhase = 0;
 		for (int j = 0; j < m_factor; ++j) {
 			const double frac = (base + j + 1) * fracStep;
-			const double iF = fastExp(lnPrev + (lnNow - lnPrev) * frac);
+			m_iF *= m_iFRatio;
+			const double iF = m_iF;
 			const double iAbc = v.iAbcPrev + (v.iAbcNow - v.iAbcPrev) * frac;
 			// VCO at 352.8/384 kHz (2x or 4x the internal rate), brought down by half-band filters.
 			for (int o = 0; o < v.vcoRatio; ++o) {
