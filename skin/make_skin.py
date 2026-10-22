@@ -476,7 +476,7 @@ def keycap_sprite(on, w, h, label):
     s.alpha_composite(sh.filter(ImageFilter.GaussianBlur(3 * k)))
     d = ImageDraw.Draw(s)
     d.rounded_rectangle((x0, y0 + press, x1, y1 + lip), radius=5 * k, fill=(90, 13, 5, 255), outline=(74, 11, 4, 255), width=k)
-    top = (240, 70, 44) if on else (222, 50, 28)
+    top = (240, 70, 44) if on else (150, 34, 20)     # off: a dimmer, unlit red
     face = Image.new("RGBA", s.size, (0, 0, 0, 0))
     fm = Image.new("L", s.size, 0)
     ImageDraw.Draw(fm).rounded_rectangle((x0, y0 + press, x1, y1), radius=5 * k, fill=255)
@@ -486,7 +486,7 @@ def keycap_sprite(on, w, h, label):
     face.putalpha(fm)
     s.alpha_composite(face)
     d = ImageDraw.Draw(s)
-    d.line([(x0 + 5 * k, y0 + press + k), (x1 - 5 * k, y0 + press + k)], fill=(255, 170, 150, 200), width=k)
+    d.line([(x0 + 5 * k, y0 + press + k), (x1 - 5 * k, y0 + press + k)], fill=(255, 170, 150, 200 if on else 110), width=k)
     gl = Image.new("RGBA", s.size, (255, 255, 255, 0))
     gm = Image.new("L", s.size, 0)
     ImageDraw.Draw(gm).rounded_rectangle((x0 + 3 * k, y0 + press + 2 * k, x1 - 3 * k, y0 + press + (y1 - y0) * 0.45), radius=4 * k, fill=50)
