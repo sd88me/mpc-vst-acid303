@@ -5,7 +5,7 @@ import make_skin as m
 from make_skin import INK, DIM, Tab
 
 K = m.add_knob
-NAME = ("ACD", "303")       # the wordmark, either side of its dash
+NAME = ("ACID", "303")       # the wordmark, either side of its dash
 
 
 def logo(t, sub):
@@ -19,7 +19,7 @@ def logo(t, sub):
     for dy, col in ((1, (255, 255, 255, 120)), (0, INK + (255,))):
         t.draw.rectangle((x * m.SS, (50 - 3.5 + dy) * m.SS, (x + dash) * m.SS, (50 + 3.5 + dy) * m.SS), fill=col)
     t.text(x + dash + 8, 52, NAME[1], size, "Logo", INK, "lm")
-    t.text(62, 88, sub, 19, "Medium", DIM, "lm")
+    t.text(1218, 54, sub, 19, "Medium", DIM, "rm")      # the tagline at the top right, level with the wordmark
 
 
 def saw_icon(t, x, y, s=9):
