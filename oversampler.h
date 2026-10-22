@@ -25,18 +25,20 @@ private:
 		// Polyphase: the odd taps only ever meet the first sample of each input pair, so those
 		// are kept apart (doubled for wrap-free reads) and weighted by `weights`, the symmetric
 		// odd taps written out in full; the second samples only feed the centre tap.
-		std::vector<double> weights; // 2n
-		std::vector<double> even;    // 2 * 2n first-of-pair samples
-		std::vector<double> odd;     // 2 * 2n second-of-pair samples
+		// Float: the inputs are float already, and float rounding (~-140 dB) is far under the
+		// filters' stop bands; on ARM it lets NEON take four taps at a time.
+		std::vector<float> weights; // 2n
+		std::vector<float> even;    // 2 * 2n first-of-pair samples
+		std::vector<float> odd;     // 2 * 2n second-of-pair samples
 		int pos = 0;
 		int len = 0; // 2n
 		void design(int halfLength, double transition, double attenuationDb);
 		void reset();
-		double process(double a, double b); // two input samples in, one out
+		float process(float a, float b); // two input samples in, one out
 	};
 	int m_stages = 0;
 	std::vector<HalfBand> m_bands;
-	std::vector<double> m_work;
+	std::vector<float> m_work;
 };
 
 } // namespace tb303

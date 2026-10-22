@@ -8,7 +8,9 @@
 // per host sample; the ladder current and VCA bias current are interpolated between.
 #include "voice.h"
 
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 #include <algorithm>
 #include <cmath>
@@ -38,19 +40,49 @@ double taperA(double x, double mid = 0.15, double shape = 0)
 }
 double taperB(double x) { return std::clamp(x, 0.0, 1.0); }
 
-// tanh, expm1 and log1p through exp and log: on armhf glibc's exp and log are the fast table
-// routines, its tanh/expm1/log1p the old fdlibm ones (several times slower). These lose relative
-// precision near 0 but keep absolute error ~1e-16, which is all the circuit equations need.
+// exp, inline: 2^(k/64) from a table times a 4th-order polynomial on |r| < ln2/128 (relative
+// error ~4e-14). glibc's is an out-of-line call with full special-case handling, and the
+// circuit solvers call it millions of times a second. Arguments are clamped to +/-700.
+struct ExpTable {
+	double t[64];
+	ExpTable()
+	{
+		for (int i = 0; i < 64; ++i)
+			t[i] = std::exp2(i / 64.0);
+	}
+};
+const ExpTable kExpTable;
+
+inline double fastExp(double x)
+{
+	constexpr double kN = 64 / 0.69314718055994530942, kLn2HiN = 0.69314718055994530942 / 64;
+	x = std::clamp(x, -700.0, 700.0);
+	const double xn = x * kN;
+	const int k = int(xn + (xn >= 0 ? 0.5 : -0.5)); // round (a plain conversion; nearbyint is a libm call on armhf)
+	const double kf = k;
+	const double r = x - kf * kLn2HiN;
+	const double p = 1 + r * (1 + r * (0.5 + r * (1.0 / 6 + r * (1.0 / 24))));
+	// 2^(k/64) = 2^(k >> 6) * table[k & 63]; build 2^(k >> 6) in the exponent bits.
+	const int e = k >> 6;
+	const uint64_t bits = uint64_t(int64_t(e) + 1023) << 52;
+	double scale;
+	std::memcpy(&scale, &bits, sizeof scale);
+	return scale * kExpTable.t[k & 63] * p;
+}
+
+// tanh, expm1 and log1p through exp and log: on armhf glibc's tanh/expm1/log1p are the old
+// fdlibm routines (several times slower). These lose relative precision near 0 but keep
+// absolute error ~1e-16, which is all the circuit equations need.
 inline double fastTanh(double x)
 {
 	if (x > 20)
 		return 1;
 	if (x < -20)
 		return -1;
-	const double e = std::exp(2 * x);
+	const double e = fastExp(2 * x);
 	return (e - 1) / (e + 1);
 }
-inline double fastExpm1(double x) { return std::exp(x) - 1; }
+inline double fastExpm1(double x) { return fastExp(x) - 1; }
 inline double fastLog1p(double x) { return std::log(1 + x); }
 
 // Diode current for voltage v (Shockley, with the exponent limited so Newton stays sane).
@@ -60,13 +92,13 @@ struct Diode {
 	{
 		const double a = v / nvt;
 		if (a > 40)
-			return is * (std::exp(40.0) * (1 + a - 40) - 1);
-		return is * (std::exp(a) - 1);
+			return is * (fastExp(40.0) * (1 + a - 40) - 1);
+		return is * (fastExp(a) - 1);
 	}
 	double slope(double v) const
 	{
 		const double a = v / nvt;
-		return is / nvt * std::exp(std::min(a, 40.0));
+		return is / nvt * fastExp(std::min(a, 40.0));
 	}
 	// Voltage across the diode in series with resistance r, driven by voltage v (v = vd + i*r).
 	double solve(double v, double r, double guess) const
@@ -308,7 +340,7 @@ struct Voice::Impl {
 			i = ladderK * ladderCurrent(1.0, v71);
 			double vth3, rth3, ra3;
 			cutoffPot(1.0, vth3, rth3, &ra3);
-			const double iE10 = i / std::exp(std::min(v71 / kVt, 30.0));
+			const double iE10 = i / fastExp(std::min(v71 / kVt, 30.0));
 			const double i63 = (vth - vs) / (rth + 220e3);
 			const double raE = 10e3 + 50e3 * envModTaper(0, cal.taperAMid, cal.taperAShape) + 1;
 			nodeE = nodeEFor((vth3 - (iE10 + i / 300) * rth3 - nodeE) / ra3 + iE10 + (vth - i63 * rth - nodeE) / raE +
@@ -344,7 +376,7 @@ struct Voice::Impl {
 		double vth, rth;
 		cutoffPot(knob, vth, rth);
 		const double r = rth + 100e3 + tm3;
-		const double a = std::exp(std::min(vR71 / kVt, 30.0));
+		const double a = fastExp(std::min(vR71 / kVt, 30.0));
 		double x = std::max(1e-12, a * (vth - nodeE - 0.52) / r);
 		// The pot's current feeds Q10's emitter and Q11's base (I/beta): x = a (I_pot - x/beta).
 		constexpr double beta11 = 300;
@@ -380,7 +412,7 @@ struct Voice::Impl {
 			double vth, rth;
 			envModThevenin(0, 0, vth, rth);
 			const double vs = (vth / (rth + 220e3) + nodeE / 2.2e3) / (1 / (rth + 220e3) + 1 / 2.2e3);
-			const double factor = std::exp((vs - nodeE) / kVt);
+			const double factor = fastExp((vs - nodeE) / kVt);
 			// Solve for tm3: target = factor * (vth3 - E - V_BE11(target))/(rth3 + 100k + tm3)
 			double vth3, rth3, ra3;
 			cutoffPot(0.5, vth3, rth3, &ra3);
@@ -422,7 +454,7 @@ struct Voice::Impl {
 		{
 			const int sub = 4;
 			const double h = dt / sub;
-			const double c54Gate = 1 - std::exp(-h / (20e3 * 0.047e-6));
+			const double c54Gate = 1 - fastExp(-h / (20e3 * 0.047e-6));
 			// Saturated once its collector reaches the rail: R145's current plus what the VEG
 			// supply draws through D35.
 			const double iSat = (kV12 - 0.1) / 10e3 + iE31;
@@ -430,7 +462,7 @@ struct Voice::Impl {
 				// Intrinsic V_EB v from c72 = v + R147 i_E + r_b i_B (Newton).
 				double v = q36Veb, iC = 0, iB = 0, diB = 0, dr = 1;
 				for (int it = 0; it < 30; ++it) {
-					const double iF = q36Is * std::exp(std::min(v, 0.95) / kVt);
+					const double iF = q36Is * fastExp(std::min(v, 0.95) / kVt);
 					const double dF = iF / kVt;
 					const bool sat = iF > iSat;
 					iC = sat ? iSat : iF;
@@ -474,7 +506,7 @@ struct Voice::Impl {
 		if (pulse > 0) {
 			const double vTop = kV12 - 0.05 - 0.6; // Q38 saturated, D37
 			const double tau = 100 * c62F;
-			c62 = vTop - (vTop - c62) * std::exp(-dt / tau);
+			c62 = vTop - (vTop - c62) * fastExp(-dt / tau);
 			pulse -= dt;
 		}
 		{
@@ -568,7 +600,7 @@ struct Voice::Impl {
 		{
 			double vth3, rth3, ra3;
 			cutoffPot(k.cutoff, vth3, rth3, &ra3);
-			const double iE10 = iRaw / std::exp(std::min(vR71 / kVt, 30.0));
+			const double iE10 = iRaw / fastExp(std::min(vR71 / kVt, 30.0));
 			const double iPot = iE10 + iRaw / 300;
 			const double i63 = (vth5 - vSum) / (rth5 + 220e3);
 			const double raE = 10e3 + 50e3 * envModTaper(k.envMod, cal.taperAMid, cal.taperAShape) + 1;
@@ -637,7 +669,7 @@ struct Voice::Impl {
 			// Junction exponentials, linear above 40 V_T so Newton stays sane. Below -50 V_T a
 			// junction's current is -Is to double precision and its slope negligible: no exp.
 			const double aF = (ve - vb) * iVt, aR = (vc - vb) * iVt;
-			const double eF = aF < -50 ? 0.0 : std::exp(std::min(aF, 40.0)), eR = aR < -50 ? 0.0 : std::exp(std::min(aR, 40.0));
+			const double eF = aF < -50 ? 0.0 : fastExp(std::min(aF, 40.0)), eR = aR < -50 ? 0.0 : fastExp(std::min(aR, 40.0));
 			const double iF = Is * ((aF > 40 ? eF * (1 + aF - 40) : eF) - 1), iR = Is * ((aR > 40 ? eR * (1 + aR - 40) : eR) - 1);
 			const double dF = Is * iVt * eF, dR = Is * iVt * eR;
 			const double iE = iF * iaF - iR, iC = iF - iR * iaR, iB = iF * ibF + iR * ibR;
@@ -1095,7 +1127,7 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 	v.tuneOct = (taperB(k.tuning) - 0.5) * 2 * v.cal.tuningRangeCents / 1200;
 	v.setVolume(k.volume);
 	const bool square = k.square;
-	const double slideStep = 1 - std::exp(-v.hv / 22e-3);
+	const double slideStep = 1 - fastExp(-v.hv / 22e-3);
 	const int div = v.ctlDiv;
 	const double fracStep = 1.0 / (div * m_factor);
 	for (int s = 0; s < n; ++s) {
@@ -1109,7 +1141,7 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 			m_ctlPhase = 0;
 		for (int j = 0; j < m_factor; ++j) {
 			const double frac = (base + j + 1) * fracStep;
-			const double iF = std::exp(lnPrev + (lnNow - lnPrev) * frac);
+			const double iF = fastExp(lnPrev + (lnNow - lnPrev) * frac);
 			const double iAbc = v.iAbcPrev + (v.iAbcNow - v.iAbcPrev) * frac;
 			// VCO at twice the internal rate, halved by a half-band filter.
 			for (int o = 0; o < 2; ++o) {

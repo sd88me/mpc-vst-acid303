@@ -43,35 +43,35 @@ void Decimator::HalfBand::design(int halfLength, double transition, double atten
 	for (double &t : taps)
 		t *= scale;
 	len = 2 * n;
-	weights.assign(size_t(len), 0.0);
+	weights.assign(size_t(len), 0.0f);
 	for (int k = 0; k < n; ++k)
-		weights[size_t(n - 1 - k)] = weights[size_t(n + k)] = taps[size_t(k)];
-	even.assign(size_t(2 * len), 0.0);
-	odd.assign(size_t(2 * len), 0.0);
+		weights[size_t(n - 1 - k)] = weights[size_t(n + k)] = float(taps[size_t(k)]);
+	even.assign(size_t(2 * len), 0.0f);
+	odd.assign(size_t(2 * len), 0.0f);
 	pos = 0;
 }
 
 void Decimator::HalfBand::reset()
 {
-	std::fill(even.begin(), even.end(), 0.0);
-	std::fill(odd.begin(), odd.end(), 0.0);
+	std::fill(even.begin(), even.end(), 0.0f);
+	std::fill(odd.begin(), odd.end(), 0.0f);
 	pos = 0;
 }
 
-double Decimator::HalfBand::process(double a, double b)
+float Decimator::HalfBand::process(float a, float b)
 {
 	// Push the pair; each phase's window is its last len samples, oldest first, at [pos, pos+len).
 	even[size_t(pos)] = even[size_t(pos + len)] = a;
 	odd[size_t(pos)] = odd[size_t(pos + len)] = b;
 	if (++pos == len)
 		pos = 0;
-	const double *x = &even[size_t(pos)];
-	const double *w = weights.data();
+	const float *x = &even[size_t(pos)];
+	const float *w = weights.data();
 	// The centre tap meets the second sample of the pair len/2 pairs back.
-	const double centre = 0.5 * odd[size_t(pos + len / 2 - 1)];
-	// Eight partial sums, so the adds don't wait on each other (len is a multiple of 8); adjacent
-	// pairs vectorise.
-	double s[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	const float centre = 0.5f * odd[size_t(pos + len / 2 - 1)];
+	// Eight partial sums, so the adds don't wait on each other (len is a multiple of 8); they
+	// vectorise as two groups of four.
+	float s[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 	for (int k = 0; k < len; k += 8)
 		for (int j = 0; j < 8; ++j)
 			s[j] += w[k + j] * x[k + j];
@@ -88,7 +88,7 @@ void Decimator::setStages(int stages)
 		const bool last = s == m_stages - 1;
 		m_bands[size_t(s)].design(last ? 32 : 12, 0.0, last ? 110.0 : 100.0);
 	}
-	m_work.assign(size_t(1 << m_stages), 0.0);
+	m_work.assign(size_t(1 << m_stages), 0.0f);
 }
 
 void Decimator::reset()
@@ -110,7 +110,7 @@ float Decimator::process(const float *in)
 			m_work[size_t(i)] = b.process(m_work[size_t(2 * i)], m_work[size_t(2 * i + 1)]);
 		count /= 2;
 	}
-	return float(m_work[0]);
+	return m_work[0];
 }
 
 double Decimator::latency() const
