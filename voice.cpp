@@ -95,12 +95,9 @@ inline double fastLog1p(double x) { return std::log(1 + x); }
 typedef float v4f __attribute__((vector_size(16)));
 typedef int v4i __attribute__((vector_size(16)));
 
-inline v4f tanh4(v4f x)
+// e^y for |y| < 88, four at a time.
+inline v4f exp4(v4f y)
 {
-	const v4f lim = {9, 9, 9, 9};
-	x = x > lim ? lim : x;
-	x = x < -lim ? -lim : x;
-	const v4f y = x + x;
 	// e = 2^n e^r, n = round(y log2 e), r = y - n ln2 (split in two for precision)
 	const v4f fn = y * 1.44269504088896341f + 0.5f;
 	v4i n = __builtin_convertvector(fn, v4i);
@@ -116,7 +113,15 @@ inline v4f tanh4(v4f x)
 	const v4i bits = (n + 127) << 23;
 	v4f scale;
 	std::memcpy(&scale, &bits, sizeof scale);
-	const v4f e = p * scale;
+	return p * scale;
+}
+
+inline v4f tanh4(v4f x)
+{
+	const v4f lim = {9, 9, 9, 9};
+	x = x > lim ? lim : x;
+	x = x < -lim ? -lim : x;
+	const v4f e = exp4(x + x);
 	const v4f den = e + 1.0f;
 #ifdef __ARM_NEON
 	v4f q = vrecpeq_f32(den);
@@ -236,7 +241,7 @@ struct Voice::Impl {
 	int vcoRatio = 2;
 	bool warpOn = getenv("TB_WARP") ? atoi(getenv("TB_WARP")) != 0 : true;
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host), and the current control step (s)
-	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-4;
+	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-2; // a step this small leaves ~1e-5 V (quadratic)
 	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
 	double pin1Tol = getenv("TB_P1TOL") ? atof(getenv("TB_P1TOL")) : 1e-9; // its Newton tolerance (V): 4e-8 of the current
 	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
@@ -530,7 +535,9 @@ struct Voice::Impl {
 		// degeneration: ~15 ms to 10 %, as a SPICE simulation of the circuit gives
 		// (tools/spice/env.cir) and Whittle measured.
 		{
-			const int sub = 4;
+			// Four substeps at the host rate; one when the control step is slower (no line has
+			// changed for a while, and C72, C54 move on 1-50 ms).
+			const int sub = dt * fsc > 1.5 ? 1 : 4;
 			const double h = dt / sub;
 			const double c54Gate = 1 - fastExp(-h / (20e3 * 0.047e-6));
 			// Saturated once its collector reaches the rail: R145's current plus what the VEG
@@ -747,7 +754,9 @@ struct Voice::Impl {
 			// Junction exponentials, linear above 40 V_T so Newton stays sane. Below -50 V_T a
 			// junction's current is -Is to double precision and its slope negligible: no exp.
 			const double aF = (ve - vb) * iVt, aR = (vc - vb) * iVt;
-			const double eF = aF < -50 ? 0.0 : fastExp(std::min(aF, 40.0)), eR = aR < -50 ? 0.0 : fastExp(std::min(aR, 40.0));
+			// Both exponentials in one float vector: ~1e-7 against a 1e-4 V stop.
+			const v4f ea = exp4(v4f{float(std::clamp(aF, -50.0, 40.0)), float(std::clamp(aR, -50.0, 40.0)), 0, 0});
+			const double eF = aF < -50 ? 0.0 : double(ea[0]), eR = aR < -50 ? 0.0 : double(ea[1]);
 			const double iF = Is * ((aF > 40 ? eF * (1 + aF - 40) : eF) - 1), iR = Is * ((aR > 40 ? eR * (1 + aR - 40) : eR) - 1);
 			const double dF = Is * iVt * eF, dR = Is * iVt * eR;
 			const double iE = iF * iaF - iR, iC = iF - iR * iaR, iB = iF * ibF + iR * ibR;
