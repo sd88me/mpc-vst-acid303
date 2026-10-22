@@ -190,6 +190,69 @@ int main(int argc, char **argv)
 		}
 		return bad ? 1 : 0;
 	}
+	if (mode == "alias") {
+		// Inharmonic energy of a sustained, open-filter note (C5 and C6, saw and square): the
+		// energy away from the harmonics, against the total, over 20 Hz-20 kHz.
+		for (int sq = 0; sq < 2; ++sq)
+			for (int note : {72, 84}) {
+				Voice v;
+				v.prepare(48000);
+				Controls c;
+				c.cutoff = 1;
+				c.resonance = 0;
+				c.envMod = 0;
+				c.decay = 1;
+				c.square = sq;
+				v.setControls(c);
+				CpuLines l;
+				l.note = note;
+				l.gate = true;
+				v.setLines(l, 1);
+				const int n = 1 << 16;
+				std::vector<float> out(n + 24000);
+				v.render(out.data(), int(out.size()));
+				std::vector<std::complex<double>> a(n);
+				for (int i = 0; i < n; ++i)
+					a[i] = out[24000 + i] * (0.5 - 0.5 * std::cos(2 * M_PI * i / (n - 1)));
+				fft(a);
+				const double bin = 48000.0 / n;
+				// f0: the probe's, refined to put the most energy on the harmonics.
+				const auto split = [&](double f0, double &harm, double &rest) {
+					harm = rest = 0;
+					for (int k = int(20 / bin); k < int(20000 / bin); ++k) {
+						const double h = k * bin / f0, m = std::norm(a[k]);
+						if (std::abs(h - std::round(h)) * f0 < 6 * bin)
+							harm += m;
+						else
+							rest += m;
+					}
+				};
+				double f0 = v.probe().vcoHz, best = 0;
+				for (double r = 0.98; r <= 1.02; r += 2e-5) {
+					double hm, rs;
+					split(v.probe().vcoHz * r, hm, rs);
+					if (hm > best) {
+						best = hm;
+						f0 = v.probe().vcoHz * r;
+					}
+				}
+				double harm, rest;
+				split(f0, harm, rest);
+				if (getenv("TB_ALIASDUMP")) {
+					std::vector<std::pair<double, double>> top;
+					for (int k = int(20 / bin); k < int(20000 / bin); ++k) {
+						const double h = k * bin / f0;
+						if (std::abs(h - std::round(h)) * f0 >= 6 * bin)
+							top.push_back({std::norm(a[k]), k * bin});
+					}
+					std::sort(top.rbegin(), top.rend());
+					for (int i = 0; i < 6; ++i)
+						printf("    %.1f Hz %.1f dB\n", top[i].second, 10 * std::log10(top[i].first / (harm + rest)));
+				}
+				printf("%s note %d (%.0f Hz): inharmonic %.1f dB\n", sq ? "square" : "saw   ", note, f0, 10 * std::log10(rest / (harm + rest)));
+			}
+		return 0;
+	}
 	// time: all scenarios, report % of one core
 	double audio = 0, wall = 0;
 	for (auto &sc : scenarios()) {

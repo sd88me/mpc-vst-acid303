@@ -234,6 +234,7 @@ struct Voice::Impl {
 	double fs = 176400, h = 1 / 176400.0; // internal rate
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host), and the current control step (s)
+	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-4;
 	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
 	double pin1Tol = getenv("TB_P1TOL") ? atof(getenv("TB_P1TOL")) : 1e-9; // its Newton tolerance (V): 4e-8 of the current
 	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
@@ -771,7 +772,7 @@ struct Voice::Impl {
 			q += std::clamp(d1, -2.0, 2.0);
 			vb += std::clamp(d2, -lim * 5, lim * 5);
 			vc += std::clamp(d3, -2.0, 2.0);
-			if (std::abs(d0) + std::abs(d2) + std::abs(d3) < 1e-7)
+			if (std::abs(d0) + std::abs(d2) + std::abs(d3) < sqTol)
 				break;
 		}
 		q8Ve = ve;
