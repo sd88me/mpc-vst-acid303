@@ -1147,7 +1147,7 @@ struct Voice::Impl {
 		// R124/R125 and its emitter resistance attenuate the input more as I_ABC rises (-0.15 dB
 		// at 48 uA, -0.6 dB at 170 uA), and the output saturates at 98.5 % of I_ABC (SPICE).
 		const double vEff = vin / (1 + iAbc / 2.5e-3);
-		const double v = 0.985 * iAbc * fastTanh(vEff / (2 * kVt)) * 52.5e3;
+		const double v = 0.985 * iAbc * double(tanh4(v4f{float(vEff / (2 * kVt)), 0, 0, 0})[0]) * 52.5e3; // float: ~-140 dB
 		// Swing about the ~5.3 V bias at pin 8: down to ~0.8 V, where the OTA's NPN mirror and
 		// the buffer's current sink saturate; up as far as the buffer's 10k pull-up from the rail
 		// can lift pin 8 against its load through C38 (VOLUME, R155 and the mixer): 4.7 V at full
