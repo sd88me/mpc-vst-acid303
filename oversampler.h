@@ -8,8 +8,10 @@ namespace tb303 {
 // voice runs at the oversampled rate and only needs the way down.
 class Decimator {
 public:
-	// stages 0-3 (factor 1, 2, 4 or 8).
-	void setStages(int stages);
+	// stages 0-3 (factor 1, 2, 4 or 8). The last stage sets the pass band's edge and gets the
+	// long filter; the earlier ones only keep their images out of it. Half lengths are in odd
+	// taps per side and must be multiples of 4.
+	void setStages(int stages, int lastHalfLength = 32, int firstHalfLength = 12);
 	int factor() const { return 1 << m_stages; }
 	void reset();
 

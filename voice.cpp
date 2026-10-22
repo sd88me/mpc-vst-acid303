@@ -262,6 +262,20 @@ struct Voice::Impl {
 	// 2x -> 1x half-band for the VCO output
 	Decimator vcoDown;
 	float vcoBuf[2] = {};
+	// vcoDown is a short half-band (8 odd taps a side: flat to 0.001 dB at 60 kHz, > 100 dB down
+	// where images would fold below 24 kHz); this delay line puts back the 48 VCO samples the
+	// original 32-tap filter delayed by, so the VCO keeps its timing against the envelopes.
+	static constexpr int kVcoTaps = 8, kVcoDelay = 2 * (32 - kVcoTaps);
+	float vcoDelay[kVcoDelay] = {};
+	int vcoDelayPos = 0;
+	float delayVco(float x)
+	{
+		const float y = vcoDelay[vcoDelayPos];
+		vcoDelay[vcoDelayPos] = x;
+		if (++vcoDelayPos == kVcoDelay)
+			vcoDelayPos = 0;
+		return y;
+	}
 
 	// ------------------------------------------------------------------ VCF (§4)
 	double u[4] = {0, 0, 0, 0}; // ladder cap voltages C18, C19, C24, C26
@@ -350,7 +364,7 @@ struct Voice::Impl {
 		hv = 1 / fsv;
 		fsc = host;
 		hc = 1 / fsc;
-		vcoDown.setStages(1);
+		vcoDown.setStages(1, kVcoTaps);
 		hpC14.set(1 / (2 * kPi * 1e-6 * 50e3), fs);           // 3.2 Hz
 		hpC15.set(1 / (2 * kPi * 1e-6 * 98e3), fs);           // 1.6 Hz
 		hpC23.set(1 / (2 * kPi * 1e-6 * 12.2e3), fs);         // 13 Hz
@@ -1255,9 +1269,9 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 					v.vCv = v.vDac;
 				const double saw = v.sawStep();
 				if (square)
-					v.vcoBuf[o] = float(v.squareStep(saw, true));
+					v.vcoBuf[o] = v.delayVco(float(v.squareStep(saw, true)));
 				else {
-					v.vcoBuf[o] = float(saw);
+					v.vcoBuf[o] = v.delayVco(float(saw));
 					if (j == 0 && o == 0)
 						v.squareStep(saw, false, 2 * m_factor);
 				}

@@ -78,7 +78,7 @@ float Decimator::HalfBand::process(float a, float b)
 	return centre + (((s[0] + s[1]) + (s[2] + s[3])) + ((s[4] + s[5]) + (s[6] + s[7])));
 }
 
-void Decimator::setStages(int stages)
+void Decimator::setStages(int stages, int lastHalfLength, int firstHalfLength)
 {
 	m_stages = stages < 0 ? 0 : stages > 3 ? 3 : stages;
 	m_bands.assign(size_t(m_stages), {});
@@ -86,7 +86,7 @@ void Decimator::setStages(int stages)
 	// can be short; the last one sets the final pass band edge (~20 kHz at 44.1k) and is long.
 	for (int s = 0; s < m_stages; ++s) {
 		const bool last = s == m_stages - 1;
-		m_bands[size_t(s)].design(last ? 32 : 12, 0.0, last ? 110.0 : 100.0);
+		m_bands[size_t(s)].design(last ? lastHalfLength : firstHalfLength, 0.0, last ? 110.0 : 100.0);
 	}
 	m_work.assign(size_t(1 << m_stages), 0.0f);
 }
