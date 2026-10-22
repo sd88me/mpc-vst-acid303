@@ -1,2 +1,4 @@
-tbtest
-tbtest-arm
+tools/voicetest/tbtest
+tools/voicetest/tbtest-arm
+tools/voicetest/out/
+vst/build/

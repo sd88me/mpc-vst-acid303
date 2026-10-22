@@ -2,6 +2,7 @@
 # Copy the armhf harness and goldens to the Force, check against the goldens and time it there:
 # best of 5, pinned to core 3 (MPC runs alongside), with the core's clock and temperature after.
 set -e
+cd "$(dirname "$0")"
 F=root@192.168.1.187
 ssh $F 'mkdir -p /tmp/tbt/golden'
 scp -q tbtest-arm $F:/tmp/tbt/tbtest
