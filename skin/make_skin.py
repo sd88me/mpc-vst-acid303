@@ -180,13 +180,24 @@ class Tab:
         self.hi.alpha_composite(im, (int(round(cx * SS - im.width / 2)), int(round(cy * SS - im.height / 2))))
 
     def header(self, cx, cy, w, label, h=28):
-        """A section's title in its outlined box (the TEMPO / WAVE / VOLUME boxes)."""
+        """A section's title: a charcoal plate printed on the metal (a light edge under it, a faint sheen across its
+        top) with the name reversed out of it in the plate's silver."""
         d = self.draw
-        d.rounded_rectangle(((cx - w / 2 + 0.8) * SS, (cy - h / 2 + 1) * SS, (cx + w / 2 + 0.8) * SS, (cy + h / 2 + 1) * SS), radius=7 * SS,
-                            outline=(255, 255, 255, 130), width=int(2.2 * SS))
-        d.rounded_rectangle(((cx - w / 2) * SS, (cy - h / 2) * SS, (cx + w / 2) * SS, (cy + h / 2) * SS), radius=7 * SS,
-                            outline=INK + (255,), width=int(2.2 * SS))
-        self.text(cx, cy + 1, label, 19, "Bold")
+        box = ((cx - w / 2) * SS, (cy - h / 2) * SS, (cx + w / 2) * SS, (cy + h / 2) * SS)
+        d.rounded_rectangle((box[0] + 0.8 * SS, box[1] + 1.2 * SS, box[2] + 0.8 * SS, box[3] + 1.2 * SS), radius=7 * SS,
+                            fill=(255, 255, 255, 110))
+        size = self.hi.size
+        m = Image.new("L", size, 0)
+        ImageDraw.Draw(m).rounded_rectangle(box, radius=7 * SS, fill=255)
+        ch = Image.new("RGBA", size, (0, 0, 0, 0))
+        g = Image.linear_gradient("L").resize((int(box[2] - box[0]), int(box[3] - box[1]))).point(lambda v: 50 - v * 22 // 255)
+        ch.paste(Image.merge("RGB", (g, g, g.point(lambda v: v + 3))).convert("RGBA"), (int(box[0]), int(box[1])))
+        ch.putalpha(m)
+        self.hi.alpha_composite(ch)
+        d = self.draw
+        d.rounded_rectangle(box, radius=7 * SS, outline=(14, 14, 16, 255), width=SS)
+        d.text((cx * SS, (cy + 1) * SS), label, font=font(19, "Bold"), fill=(222, 223, 226, 255), anchor="mm",
+               stroke_width=stroke("Bold"), stroke_fill=(222, 223, 226, 255))
 
     def well(self, x0, y0, x1, y1, r=14):
         """A section recessed into the plate: a slightly darker floor, its inner shadow on the top-left edges and a
