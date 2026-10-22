@@ -61,6 +61,9 @@ static std::vector<Scenario> scenarios()
 		{"sq_mid", C(0.5, 0.5, 0.5, 0.5, 0.5, true), 0},
 		{"sq_fullres", C(0.6, 1.0, 0.9, 0.2, 1.0, true), 1},
 		{"sweep", C(0.5, 0.5, 0.5, 0.5, 0.7, false), 2},
+		{"saw_bright_res", C(0.85, 0.75, 0.8, 0.6, 0.8, false), 1},
+		{"sq_bright_res", C(0.8, 0.9, 0.6, 0.4, 0.6, true), 0},
+		{"saw_top_res", C(1.0, 1.0, 0.5, 0.5, 1.0, false), 1},
 	};
 }
 
@@ -161,7 +164,7 @@ int main(int argc, char **argv)
 	if (mode == "golden" || mode == "check") {
 		int bad = 0;
 		for (auto &sc : scenarios()) {
-			const auto out = render(sc);
+			auto out = render(sc);
 			const std::string path = dir + "/" + sc.name + ".f32";
 			if (mode == "golden") {
 				FILE *f = fopen(path.c_str(), "wb");
@@ -173,6 +176,32 @@ int main(int argc, char **argv)
 			FILE *f = fopen(path.c_str(), "rb");
 			if (!f || fread(ref.data(), 4, ref.size(), f) != ref.size()) { printf("%s: no golden\n", sc.name); return 2; }
 			fclose(f);
+			// A change of latency (oversampling, filter lengths) shifts the whole output: find
+			// the lag (+/-64 samples) that best lines it up with the golden and compare there.
+			int lag = 0;
+			{
+				double best = -1e300;
+				const size_t span = std::min<size_t>(out.size() - 128, 96000);
+				for (int l = -64; l <= 64; ++l) {
+					double c = 0;
+					for (size_t i = 64; i < span; ++i)
+						c += double(ref[i]) * out[size_t(int(i) + l)];
+					if (c > best) {
+						best = c;
+						lag = l;
+					}
+				}
+				if (lag != 0) {
+					std::vector<float> sh(out.size(), 0.0f);
+					for (size_t i = 0; i < out.size(); ++i) {
+						const long j = long(i) + lag;
+						if (j >= 0 && j < long(out.size()))
+							sh[i] = out[size_t(j)];
+					}
+					out = sh;
+					printf("%-12s output lag %d samples\n", sc.name, lag);
+				}
+			}
 			double peak = 0, se = 0, sr = 0;
 			for (size_t i = 0; i < out.size(); ++i) {
 				const double d = double(out[i]) - ref[i];

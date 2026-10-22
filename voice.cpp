@@ -232,7 +232,9 @@ struct HighPass {
 struct Voice::Impl {
 	// ------------------------------------------------------------------ constants
 	double fs = 176400, h = 1 / 176400.0; // internal rate
-	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
+	double fsv = 352800, hv = 1 / 352800.0; // VCO rate: 352.8/384 kHz, 2x or 4x the internal rate
+	int vcoRatio = 2;
+	bool warpOn = getenv("TB_WARP") ? atoi(getenv("TB_WARP")) != 0 : true;
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host), and the current control step (s)
 	double sqTol = getenv("TB_SQTOL") ? atof(getenv("TB_SQTOL")) : 1e-4;
 	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
@@ -262,18 +264,21 @@ struct Voice::Impl {
 
 	// 2x -> 1x half-band for the VCO output
 	Decimator vcoDown;
-	float vcoBuf[2] = {};
+	float vcoBuf[4] = {};
 	// vcoDown is a short half-band (8 odd taps a side: flat to 0.001 dB at 60 kHz, > 100 dB down
-	// where images would fold below 24 kHz); this delay line puts back the 48 VCO samples the
-	// original 32-tap filter delayed by, so the VCO keeps its timing against the envelopes.
-	static constexpr int kVcoTaps = 8, kVcoDelay = 2 * (32 - kVcoTaps);
-	float vcoDelay[kVcoDelay] = {};
-	int vcoDelayPos = 0;
+	// where images would fold below 24 kHz); this delay line puts back the time the original
+	// 32-tap filter delayed by (63 samples at 352.8-384 kHz), so the VCO keeps its timing
+	// against the envelopes.
+	static constexpr int kVcoTaps = 8, kVcoDelayMax = 64;
+	float vcoDelay[kVcoDelayMax] = {};
+	int vcoDelayLen = 48, vcoDelayPos = 0;
 	float delayVco(float x)
 	{
+		if (vcoDelayLen == 0)
+			return x;
 		const float y = vcoDelay[vcoDelayPos];
 		vcoDelay[vcoDelayPos] = x;
-		if (++vcoDelayPos == kVcoDelay)
+		if (++vcoDelayPos == vcoDelayLen)
 			vcoDelayPos = 0;
 		return y;
 	}
@@ -361,11 +366,16 @@ struct Voice::Impl {
 	{
 		fs = internal;
 		h = 1 / fs;
-		fsv = 2 * fs;
+		// The VCO stays at 352.8/384 kHz whatever the internal rate: the square shaper's edges
+		// alias audibly below that (tbtest alias).
+		vcoRatio = fs < 150e3 ? 4 : 2;
+		fsv = vcoRatio * fs;
 		hv = 1 / fsv;
 		fsc = host;
 		hc = 1 / fsc;
-		vcoDown.setStages(1, kVcoTaps);
+		vcoDown.setStages(vcoRatio == 4 ? 2 : 1, kVcoTaps);
+		vcoDelayLen = std::clamp(int(std::lround((63.0 / 384e3 - vcoDown.latency() / fs) * fsv)), 0, kVcoDelayMax);
+		vcoDelayPos = 0;
 		hpC14.set(1 / (2 * kPi * 1e-6 * 50e3), fs);           // 3.2 Hz
 		hpC15.set(1 / (2 * kPi * 1e-6 * 98e3), fs);           // 1.6 Hz
 		hpC23.set(1 / (2 * kPi * 1e-6 * 12.2e3), fs);         // 13 Hz
@@ -795,8 +805,21 @@ struct Voice::Impl {
 		constexpr double kInv2Vt = 1 / (2 * kVt);
 		const double gTop = 1 / (rLoad * C[3]); // C26's discharge through Q21's input, per volt
 		double kc[4];
+		// Prewarp: the trapezoidal step puts the ring at tan(x)/x of its frequency, x = pi f/fs;
+		// below 4x oversampling, scale the stage currents so it lands where a 4x run puts it.
+		double warp = 1;
+		if (fs < 150e3 && warpOn) {
+			const double f = ringHzForCurrent(iF);
+			// tan(x)/x as its [4/4] Pade approximant (1e-6 up to x = 1.2), blended in with the
+			// resonance: without it the poles aren't at the ring and a full warp overcorrects.
+			const auto w = [](double x) {
+				const double x2 = std::min(x * x, 1.44);
+				return (945 - 105 * x2 + x2 * x2) / (945 - 420 * x2 + 15 * x2 * x2);
+			};
+			warp = 1 + taperB(resKnob) * (w(kPi * f / fs) / w(kPi * f / (2 * fs)) - 1);
+		}
 		for (int i = 0; i < 4; ++i)
-			kc[i] = iF * (0.5 / C[i]);
+			kc[i] = iF * warp * (0.5 / C[i]);
 
 		// Linear parts of the feedback chain at this step:
 		// w = aW*u4 + bW (C25/C27), amp = G tanh(w/2Vt), out = a14*amp + b14 (C14),
@@ -1160,7 +1183,7 @@ void Voice::prepare(double hostRate)
 	if (const char *e = getenv("TB_FASTMS"))
 		m_fastMs = atof(e);
 	int stages = 0;
-	const double minRate = getenv("TB_MIN") ? atof(getenv("TB_MIN")) : 176000;
+	const double minRate = getenv("TB_MIN") ? atof(getenv("TB_MIN")) : m_minInternalRate;
 	while (stages < 3 && hostRate * (1 << stages) < minRate)
 		++stages;
 	m_factor = 1 << stages;
@@ -1259,8 +1282,8 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 			const double frac = (base + j + 1) * fracStep;
 			const double iF = fastExp(lnPrev + (lnNow - lnPrev) * frac);
 			const double iAbc = v.iAbcPrev + (v.iAbcNow - v.iAbcPrev) * frac;
-			// VCO at twice the internal rate, halved by a half-band filter.
-			for (int o = 0; o < 2; ++o) {
+			// VCO at 352.8/384 kHz (2x or 4x the internal rate), brought down by half-band filters.
+			for (int o = 0; o < v.vcoRatio; ++o) {
 				// Slide RC on the CV, then the saw and the square shaper. With SAW selected the
 				// shaper's output is unused (and unloaded), so it only keeps its bias state,
 				// stepped once per host sample, for a clean switch to SQUARE.
@@ -1274,7 +1297,7 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 				else {
 					v.vcoBuf[o] = v.delayVco(float(saw));
 					if (j == 0 && o == 0)
-						v.squareStep(saw, false, 2 * m_factor);
+						v.squareStep(saw, false, v.vcoRatio * m_factor);
 				}
 			}
 			const double osc = v.vcoDown.process(v.vcoBuf);

@@ -85,6 +85,7 @@ public:
 	Voice();
 	~Voice();
 	void prepare(double hostRate);
+	void setMinInternalRate(double hz) { m_minInternalRate = hz; }
 	void reset();
 	void setControls(const Controls &c) { m_controls = c; }
 	const Controls &controls() const { return m_controls; }
@@ -124,6 +125,10 @@ private:
 	// Adaptive control rate (render): every host sample for m_fastMs after the CPU lines change,
 	// otherwise every m_ctlDiv host samples.
 	int m_ctlDiv = 4;
+	// The VCF/VCA run at the lowest power-of-two multiple of the host rate at or above this
+	// (the VCO stays at 352.8/384 kHz): 176 kHz is Lemus's 4x; 88 kHz (2x, with the ladder
+	// prewarped) is within 0.25 dB of it per frame at about 80 % of the cost.
+	double m_minInternalRate = 176000;
 	double m_fastMs = 40;
 	int m_ctlPhase = 0, m_curDiv = 1, m_fastLeft = 0;
 	Decimator m_decimator;
