@@ -5,19 +5,20 @@ import make_skin as m
 from make_skin import INK, DIM, Tab
 
 K = m.add_knob
+NAME = ("ACD", "303")       # the wordmark, either side of its dash
 
 
 def logo(t, sub):
-    # Earth Normal has no dash: MODEL and 303 set apart, the dash drawn between them at the letters' weight
+    # Earth Normal has no dash: the name's two halves set apart, the dash drawn between them at the letters' weight
     size = 46
     f = m.font(size, "Logo")
     x = 60
-    t.text(x, 52, "MODEL", size, "Logo", INK, "lm")
-    x += f.getlength("MODEL") / m.SS + 8
+    t.text(x, 52, NAME[0], size, "Logo", INK, "lm")
+    x += f.getlength(NAME[0]) / m.SS + 8
     dash = 22
     for dy, col in ((1, (255, 255, 255, 120)), (0, INK + (255,))):
         t.draw.rectangle((x * m.SS, (50 - 3.5 + dy) * m.SS, (x + dash) * m.SS, (50 + 3.5 + dy) * m.SS), fill=col)
-    t.text(x + dash + 8, 52, "303", size, "Logo", INK, "lm")
+    t.text(x + dash + 8, 52, NAME[1], size, "Logo", INK, "lm")
     t.text(62, 88, sub, 19, "Medium", DIM, "lm")
 
 
