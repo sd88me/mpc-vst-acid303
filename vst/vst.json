@@ -2,7 +2,7 @@
   "name": "Acid-303",
   "vendor": "sd88me",
   "uid": "A303",
-  "version": 1000,
+  "version": 1001,
   "targets": [
     "armv7",
     "aarch64"

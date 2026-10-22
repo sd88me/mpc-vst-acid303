@@ -75,7 +75,9 @@ and QUALITY flipping between HQ and ECO, reaches about 42–50% p99, over the WA
 HQ costs more again (about 43% of a core). If a project glitches, use ECO and fewer instances.
 
 Gen2 devices (MPC Live III, Key 37 and other aarch64 models) are faster and run **HQ**, the original's full 4×, by
-default.
+default. Measured on a Live III with the same bench: about 8.5% of an audio block while playing, 15% at the 99th
+percentile and 17% worst block through the control sweep (WARN, just over the PASS line). The aarch64 build flushes
+denormals to zero while rendering, as Gen1's NEON does by itself; without it sweeps spiked past 3000%.
 
 ## Features
 
