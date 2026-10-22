@@ -8,6 +8,8 @@
 // per host sample; the ladder current and VCA bias current are interpolated between.
 #include "voice.h"
 
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 
@@ -35,6 +37,21 @@ double taperA(double x, double mid = 0.15, double shape = 0)
 	return curve + shape * (segments - curve);
 }
 double taperB(double x) { return std::clamp(x, 0.0, 1.0); }
+
+// tanh, expm1 and log1p through exp and log: on armhf glibc's exp and log are the fast table
+// routines, its tanh/expm1/log1p the old fdlibm ones (several times slower). These lose relative
+// precision near 0 but keep absolute error ~1e-16, which is all the circuit equations need.
+inline double fastTanh(double x)
+{
+	if (x > 20)
+		return 1;
+	if (x < -20)
+		return -1;
+	const double e = std::exp(2 * x);
+	return (e - 1) / (e + 1);
+}
+inline double fastExpm1(double x) { return std::exp(x) - 1; }
+inline double fastLog1p(double x) { return std::log(1 + x); }
 
 // Diode current for voltage v (Shockley, with the exponent limited so Newton stays sane).
 struct Diode {
@@ -76,7 +93,7 @@ constexpr Diode kSignalDiode{4e-9, 1.9 * kVt}; // 1S1588/1N4148 class
 // call is skipped (most junctions here sit far below that while they're off).
 double junctionExpm1(double a)
 {
-	return a < -40 ? -1.0 : std::expm1(std::min(a, 40.0));
+	return a < -40 ? -1.0 : fastExpm1(std::min(a, 40.0));
 }
 
 // (1 + p)^(-1/n) for p >= 0: the binomial series to p^5 while p < 0.02 (relative error under
@@ -132,7 +149,8 @@ struct Voice::Impl {
 	// ------------------------------------------------------------------ constants
 	double fs = 176400, h = 1 / 176400.0; // internal rate
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
-	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host)
+	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host / ctlDiv)
+	int ctlDiv = 1;                          // host samples per control step
 	Calibration cal;
 
 	// ------------------------------------------------------------------ CV, slide (§2.2-2.3)
@@ -243,7 +261,7 @@ struct Voice::Impl {
 		h = 1 / fs;
 		fsv = 2 * fs;
 		hv = 1 / fsv;
-		fsc = host;
+		fsc = host / ctlDiv;
 		hc = 1 / fsc;
 		vcoDown.setStages(1);
 		hpC14.set(1 / (2 * kPi * 1e-6 * 50e3), fs);           // 3.2 Hz
@@ -460,12 +478,12 @@ struct Voice::Impl {
 		{
 			// Implicit step of C62 discharging into R and the diode string. With i = 0 the string
 			// stands at vStr0; while C62 is below that, every iteration gives i = 0 again.
-			static const double vStr0 = kSignalDiode.nvt * std::log1p(0.19e-3 / kSignalDiode.is);
+			static const double vStr0 = kSignalDiode.nvt * fastLog1p(0.19e-3 / kSignalDiode.is);
 			double i = 0;
 			for (int it = 0; it < 4 && c62 > vStr0; ++it) {
 				const double vStr = it == 0 ? vStr0
-				                            : 2 * kSignalDiode.nvt * std::log1p(i / kSignalDiode.is) +
-				                                  kSignalDiode.nvt * std::log1p((i + 0.19e-3) / kSignalDiode.is);
+				                            : 2 * kSignalDiode.nvt * fastLog1p(i / kSignalDiode.is) +
+				                                  kSignalDiode.nvt * fastLog1p((i + 0.19e-3) / kSignalDiode.is);
 				const double inew = std::max(0.0, (c62 - vStr) / rDecay);
 				i = 0.5 * (i + inew);
 			}
@@ -690,7 +708,7 @@ struct Voice::Impl {
 		const double B = div * (a23 * loopFollower * (a15 * resWiper * b14 + b15) + b23);
 		auto feedback = [&](double u4, double &dfb) {
 			const double w = aW * u4 + bW;
-			const double t = std::tanh(w * kInv2Vt);
+			const double t = fastTanh(w * kInv2Vt);
 			dfb = A * (1 - t * t) * kInv2Vt * aW;
 			return A * t + B;
 		};
@@ -707,11 +725,11 @@ struct Voice::Impl {
 			double dfb;
 			const double fb = feedback(un[3], dfb);
 			x = xIn - fb;
-			const double t0 = std::tanh(x * kInv2Vt);
-			const double t1 = std::tanh((un[0] - un[1]) * kInv2Vt);
-			const double t2 = std::tanh((un[1] - un[2]) * kInv2Vt);
-			const double t3 = std::tanh((un[2] - un[3]) * kInv2Vt);
-			const double t4 = std::tanh(un[3] * kInv2Vt);
+			const double t0 = fastTanh(x * kInv2Vt);
+			const double t1 = fastTanh((un[0] - un[1]) * kInv2Vt);
+			const double t2 = fastTanh((un[1] - un[2]) * kInv2Vt);
+			const double t3 = fastTanh((un[2] - un[3]) * kInv2Vt);
+			const double t4 = fastTanh(un[3] * kInv2Vt);
 			// The top node also feeds Q21 through C25/C27: w/rLoad leaves C26.
 			const double iLC = (aW * un[3] + bW) * gTop; // i_L / C26
 			const double f[4] = {kc[0] * (t0 - t1), kc[1] * (t1 - t2), kc[2] * (t2 - t3), kc[3] * (t3 - t4) - iLC};
@@ -768,11 +786,11 @@ struct Voice::Impl {
 		}
 		// Commit the step: ladder state, derivatives, and the feedback-chain filters.
 		if (!converged) {
-			tc[0] = std::tanh(x * kInv2Vt);
-			tc[1] = std::tanh((un[0] - un[1]) * kInv2Vt);
-			tc[2] = std::tanh((un[1] - un[2]) * kInv2Vt);
-			tc[3] = std::tanh((un[2] - un[3]) * kInv2Vt);
-			tc[4] = std::tanh(un[3] * kInv2Vt);
+			tc[0] = fastTanh(x * kInv2Vt);
+			tc[1] = fastTanh((un[0] - un[1]) * kInv2Vt);
+			tc[2] = fastTanh((un[1] - un[2]) * kInv2Vt);
+			tc[3] = fastTanh((un[2] - un[3]) * kInv2Vt);
+			tc[4] = fastTanh(un[3] * kInv2Vt);
 		}
 		const double t0 = tc[0], t1 = tc[1], t2 = tc[2], t3 = tc[3], t4 = tc[4];
 		for (int i = 0; i < 4; ++i)
@@ -784,7 +802,7 @@ struct Voice::Impl {
 		for (int i = 0; i < 4; ++i)
 			u[i] = un[i];
 		const double w = hpC25.process(u[3]);
-		const double amp = ampGain * std::tanh(w * kInv2Vt);
+		const double amp = ampGain * fastTanh(w * kInv2Vt);
 		vcfOut = hpC14.process(amp);
 		vcfWiper = resWiper * vcfOut;
 		const double q18 = hpC15.process(vcfWiper);
@@ -880,7 +898,7 @@ struct Voice::Impl {
 		double iC = 0, iD = 0, iEC = 0;
 		// Pin 1's current i balances Q31's collector and D27: f(i) falls with i.
 		const auto f = [&](double i) {
-			const double vP = kVt * std::log1p(i / 5e-16) + 450 * i + cal.pin1ShiftV;
+			const double vP = kVt * fastLog1p(i / 5e-16) + 450 * i + cal.pin1ShiftV;
 			iEC = is31 * junctionExpm1((vP - c42) / kVt);
 			iC = (iE + iEC) / (1 + 1 / bf31) - iEC * (1 + 1 / br31);
 			const double drive = c36 - vP;
@@ -916,7 +934,7 @@ struct Voice::Impl {
 		iAcc = iD;
 		iE31 = iE;
 		iB31 = iE - iC;
-		q31Ve = c42 + kVt * std::log1p(std::max(0.0, (iE + iEC) / (1 + 1 / bf31)) / is31);
+		q31Ve = c42 + kVt * fastLog1p(std::max(0.0, (iE + iEC) / (1 + 1 / bf31)) / is31);
 	}
 
 	// ------------------------------------------------------------------ VCA (runs at fs)
@@ -938,7 +956,7 @@ struct Voice::Impl {
 		// R124/R125 and its emitter resistance attenuate the input more as I_ABC rises (-0.15 dB
 		// at 48 uA, -0.6 dB at 170 uA), and the output saturates at 98.5 % of I_ABC (SPICE).
 		const double vEff = vin / (1 + iAbc / 2.5e-3);
-		const double v = 0.985 * iAbc * std::tanh(vEff / (2 * kVt)) * 52.5e3;
+		const double v = 0.985 * iAbc * fastTanh(vEff / (2 * kVt)) * 52.5e3;
 		// Swing about the ~5.3 V bias at pin 8: down to ~0.8 V, where the OTA's NPN mirror and
 		// the buffer's current sink saturate; up as far as the buffer's 10k pull-up from the rail
 		// can lift pin 8 against its load through C38 (VOLUME, R155 and the mixer): 4.7 V at full
@@ -998,14 +1016,18 @@ void Voice::setCalibration(const Calibration &c)
 void Voice::prepare(double hostRate)
 {
 	m_hostRate = hostRate;
+	if (const char *e = getenv("TB_CTL"))
+		m_ctlDiv = std::max(1, atoi(e));
 	int stages = 0;
-	while (stages < 3 && hostRate * (1 << stages) < 176000)
+	const double minRate = getenv("TB_MIN") ? atof(getenv("TB_MIN")) : 176000;
+	while (stages < 3 && hostRate * (1 << stages) < minRate)
 		++stages;
 	m_factor = 1 << stages;
 	m_rate = hostRate * m_factor;
 	m_decimator.setStages(stages);
 	m_work.assign(size_t(m_factor), 0.0f);
 	m_impl->cal = m_cal;
+	m_impl->ctlDiv = m_ctlDiv;
 	m_impl->setRates(m_rate, hostRate);
 	reset();
 }
@@ -1022,7 +1044,9 @@ void Voice::reset()
 	const double rate = m_rate, host = m_hostRate;
 	*m_impl = Impl();
 	m_impl->cal = cal;
+	m_impl->ctlDiv = m_ctlDiv;
 	m_impl->setRates(rate, host);
+	m_ctlPhase = 0;
 	m_decimator.reset();
 	m_lines = CpuLines();
 	m_retrigger = false;
@@ -1070,12 +1094,19 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 	v.setVolume(k.volume);
 	const bool square = k.square;
 	const double slideStep = 1 - std::exp(-v.hv / 22e-3);
+	const int div = v.ctlDiv;
+	const double fracStep = 1.0 / (div * m_factor);
 	for (int s = 0; s < n; ++s) {
-		v.controlStep(k, m_lines, m_retrigger);
-		m_retrigger = false;
+		if (m_ctlPhase == 0) {
+			v.controlStep(k, m_lines, m_retrigger);
+			m_retrigger = false;
+		}
 		const double lnPrev = v.lnIfPrev, lnNow = v.lnIfNow;
+		const int base = m_ctlPhase * m_factor;
+		if (++m_ctlPhase == div)
+			m_ctlPhase = 0;
 		for (int j = 0; j < m_factor; ++j) {
-			const double frac = double(j + 1) / m_factor;
+			const double frac = (base + j + 1) * fracStep;
 			const double iF = std::exp(lnPrev + (lnNow - lnPrev) * frac);
 			const double iAbc = v.iAbcPrev + (v.iAbcNow - v.iAbcPrev) * frac;
 			// VCO at twice the internal rate, halved by a half-band filter.

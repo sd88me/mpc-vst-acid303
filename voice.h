@@ -121,6 +121,8 @@ private:
 	bool m_needsReset = false, m_inWarmup = false;
 	double m_hostRate = 44100, m_rate = 176400;
 	int m_factor = 4;
+	int m_ctlDiv = 1;   // host samples per control step
+	int m_ctlPhase = 0;
 	Decimator m_decimator;
 	std::vector<float> m_work;
 	std::unique_ptr<Impl> m_impl;
