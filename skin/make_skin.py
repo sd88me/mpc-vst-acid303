@@ -457,6 +457,52 @@ def add_switch(t, key, cx, cy, positions, labels=None, size=46, label_dx=34, nam
                            draw=lambda i: bat_sprite(positions[i], size), seg=(sw, h // n), seg_cx=scx))
 
 
+def keycap_sprite(on, w, h, label):
+    """The Acid sequencer's red keycap: a raised flat key, lit top edge, darker lower lip, gloss, a deep contact
+    shadow. On: pressed (lower, less lip, less shadow) and lit with a glow."""
+    k = SS
+    pad = 12
+    s = Image.new("RGBA", ((w + 2 * pad) * k, (h + 2 * pad) * k), (0, 0, 0, 0))
+    x0, y0 = pad * k, pad * k
+    x1, y1 = (pad + w) * k, (pad + h) * k
+    press = 2 * k if on else 0
+    lip = (2 if on else 4) * k
+    if on:
+        glow = Image.new("RGBA", s.size, (0, 0, 0, 0))
+        ImageDraw.Draw(glow).rounded_rectangle((x0 - 4 * k, y0 - 4 * k + press, x1 + 4 * k, y1 + 4 * k + press), radius=8 * k, fill=(255, 70, 40, 140))
+        s.alpha_composite(glow.filter(ImageFilter.GaussianBlur(6 * k)))
+    sh = Image.new("RGBA", s.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle((x0 + 1 * k, y0 + 4 * k + press, x1 + 1 * k, y1 + lip + 4 * k), radius=5 * k, fill=(0, 0, 0, 120 if on else 170))
+    s.alpha_composite(sh.filter(ImageFilter.GaussianBlur(3 * k)))
+    d = ImageDraw.Draw(s)
+    d.rounded_rectangle((x0, y0 + press, x1, y1 + lip), radius=5 * k, fill=(90, 13, 5, 255), outline=(74, 11, 4, 255), width=k)
+    top = (240, 70, 44) if on else (222, 50, 28)
+    face = Image.new("RGBA", s.size, (0, 0, 0, 0))
+    fm = Image.new("L", s.size, 0)
+    ImageDraw.Draw(fm).rounded_rectangle((x0, y0 + press, x1, y1), radius=5 * k, fill=255)
+    g = Image.linear_gradient("L").resize((x1 - x0, y1 - y0)).point(lambda v: 150 - v * 50 // 255)
+    col = Image.merge("RGB", [g.point(lambda v, c=c: min(255, c * v // 128)) for c in top]).convert("RGBA")
+    face.paste(col, (x0, y0 + press))
+    face.putalpha(fm)
+    s.alpha_composite(face)
+    d = ImageDraw.Draw(s)
+    d.line([(x0 + 5 * k, y0 + press + k), (x1 - 5 * k, y0 + press + k)], fill=(255, 170, 150, 200), width=k)
+    gl = Image.new("RGBA", s.size, (255, 255, 255, 0))
+    gm = Image.new("L", s.size, 0)
+    ImageDraw.Draw(gm).rounded_rectangle((x0 + 3 * k, y0 + press + 2 * k, x1 - 3 * k, y0 + press + (y1 - y0) * 0.45), radius=4 * k, fill=50)
+    gl.putalpha(gm.filter(ImageFilter.GaussianBlur(1.5 * k)))
+    s.alpha_composite(gl)
+    d.text(((x0 + x1) / 2, (y0 + y1) / 2 + press), label, font=font(17, "Bold"), fill=(255, 255, 255, 255), anchor="mm",
+           stroke_width=stroke("SemiBold"), stroke_fill=(255, 255, 255, 255))
+    return s
+
+
+def add_key(t, key, cx, cy, label, w=104, h=40):
+    """A red keycap toggle (the Acid sequencer's), on/off pictures."""
+    t.controls.append(dict(kind="pair", key=key, cx=cx, cy=cy, w=even(w + 24), h=even(h + 28),
+                           draw=lambda st: keycap_sprite(st, w, h, label)))
+
+
 def add_button(t, key, cx, cy, d=40, name=None, name_dy=-40):
     if name:
         t.text(cx, cy + name_dy, name, 18)
