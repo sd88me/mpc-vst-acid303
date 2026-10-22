@@ -618,13 +618,13 @@ struct Voice::Impl {
 	}
 
 	// Q8 PNP shaper (§3.5), backward Euler + Newton on V_E, q (C10), V_B, V_C.
-	double squareStep(double vSaw, bool loaded)
+	double squareStep(double vSaw, bool loaded, double stepScale = 1)
 	{
 		constexpr double R45 = 22e3, C11 = 1e-6, R36 = 10e3, R35 = 100e3, R34 = 10e3, C10 = 0.01e-6;
 		constexpr double Is = 2e-14, bF = 250, bR = 5;
 		constexpr double g45 = 1 / R45, g36 = 1 / R36, g35 = 1 / R35, g34 = 1 / R34, iVt = 1 / kVt;
 		constexpr double iaF = (1 + bF) / bF, iaR = (1 + bR) / bR, ibF = 1 / bF, ibR = 1 / bR; // 1/alpha, 1/beta
-		const double cC11 = C11 * fsv, cC10 = C10 * fsv; // the capacitors' backward-Euler conductances
+		const double cC11 = C11 * fsv / stepScale, cC10 = C10 * fsv / stepScale; // the capacitors' backward-Euler conductances
 		const double gLoad = loaded ? 1 / 222.2e3 : 0.0; // R62 into the VCF input (via C17)
 		const double vLoad = kVref + c17;               // C17 holds the average
 		double ve = q8Ve, q = q8Q, vb = q8Vb, vc = q8Vc;
@@ -1111,14 +1111,21 @@ void Voice::render(float *out, int n, float *s1, float *tp6)
 			const double iAbc = v.iAbcPrev + (v.iAbcNow - v.iAbcPrev) * frac;
 			// VCO at twice the internal rate, halved by a half-band filter.
 			for (int o = 0; o < 2; ++o) {
-				// Slide RC on the CV, then the saw and (always running) the square shaper.
+				// Slide RC on the CV, then the saw and the square shaper. With SAW selected the
+				// shaper's output is unused (and unloaded), so it only keeps its bias state,
+				// stepped once per host sample, for a clean switch to SQUARE.
 				if (m_lines.slide)
 					v.vCv += (v.vDac - v.vCv) * slideStep;
 				else
 					v.vCv = v.vDac;
 				const double saw = v.sawStep();
-				const double sq = v.squareStep(saw, square);
-				v.vcoBuf[o] = float(square ? sq : saw);
+				if (square)
+					v.vcoBuf[o] = float(v.squareStep(saw, true));
+				else {
+					v.vcoBuf[o] = float(saw);
+					if (j == 0 && o == 0)
+						v.squareStep(saw, false, 2 * m_factor);
+				}
 			}
 			const double osc = v.vcoDown.process(v.vcoBuf);
 			// Input network: R62 220k, C17 1 uF, R70 2.2k to the bias node.
