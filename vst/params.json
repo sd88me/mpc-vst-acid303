@@ -1,0 +1,235 @@
+{
+ "name": "Model-303",
+ "params": [
+  {
+   "key": "tune",
+   "name": "Tune",
+   "min": -700,
+   "max": 700,
+   "default": 0,
+   "unit": "ct"
+  },
+  {
+   "key": "cutoff",
+   "name": "Cut Off",
+   "min": 0,
+   "max": 10,
+   "default": 5
+  },
+  {
+   "key": "resonance",
+   "name": "Resonance",
+   "min": 0,
+   "max": 10,
+   "default": 5
+  },
+  {
+   "key": "env_mod",
+   "name": "Env Mod",
+   "min": 0,
+   "max": 10,
+   "default": 5
+  },
+  {
+   "key": "decay",
+   "name": "Decay",
+   "min": 0,
+   "max": 10,
+   "default": 5
+  },
+  {
+   "key": "accent",
+   "name": "Accent",
+   "min": 0,
+   "max": 10,
+   "default": 5
+  },
+  {
+   "key": "volume",
+   "name": "Volume",
+   "min": 0,
+   "max": 10,
+   "default": 7
+  },
+  {
+   "key": "waveform",
+   "name": "Waveform",
+   "options": [
+    "SAW",
+    "SQUARE"
+   ],
+   "default": "SAW"
+  },
+  {
+   "key": "accent_hold",
+   "name": "Accent",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": "OFF"
+  },
+  {
+   "key": "quality",
+   "name": "Quality",
+   "options": [
+    "AUTO",
+    "ECO",
+    "HQ"
+   ],
+   "default": "AUTO"
+  },
+  {
+   "key": "devil_fish",
+   "name": "Devil Fish",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": "OFF"
+  },
+  {
+   "key": "soft_attack",
+   "name": "Soft Attack",
+   "min": 0,
+   "max": 10,
+   "default": 2
+  },
+  {
+   "key": "normal_decay",
+   "name": "Normal Decay",
+   "min": 0,
+   "max": 10,
+   "default": 2
+  },
+  {
+   "key": "accent_decay",
+   "name": "Accent Decay",
+   "min": 0,
+   "max": 10,
+   "default": 2.7
+  },
+  {
+   "key": "filter_tracking",
+   "name": "Filter Tracking",
+   "min": 0,
+   "max": 10,
+   "default": 0
+  },
+  {
+   "key": "overdrive",
+   "name": "Overdrive",
+   "min": 0,
+   "max": 10,
+   "default": 0
+  },
+  {
+   "key": "slide_time",
+   "name": "Slide Time",
+   "min": 0,
+   "max": 10,
+   "default": 0
+  },
+  {
+   "key": "filter_fm",
+   "name": "Filter FM",
+   "min": 0,
+   "max": 10,
+   "default": 0
+  },
+  {
+   "key": "sweep_speed",
+   "name": "Sweep Speed",
+   "options": [
+    "FAST",
+    "NORM",
+    "SLOW"
+   ],
+   "default": "NORM"
+  },
+  {
+   "key": "accent_sweep",
+   "name": "Accent Sweep",
+   "options": [
+    "0",
+    "1",
+    "2"
+   ],
+   "default": "2"
+  },
+  {
+   "key": "muffler",
+   "name": "Muffler",
+   "options": [
+    "0",
+    "1",
+    "2"
+   ],
+   "default": "0"
+  },
+  {
+   "key": "sub_osc",
+   "name": "Sub Osc",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": "OFF"
+  },
+  {
+   "key": "sub_level",
+   "name": "Sub Level",
+   "options": [
+    "LOW",
+    "MID",
+    "HIGH"
+   ],
+   "default": "MID"
+  },
+  {
+   "key": "vco",
+   "name": "VCO",
+   "options": [
+    "ON",
+    "OFF"
+   ],
+   "default": "ON"
+  }
+ ],
+ "sections": [
+  {
+   "label": "303",
+   "keys": [
+    "tune",
+    "cutoff",
+    "resonance",
+    "env_mod",
+    "decay",
+    "accent",
+    "volume",
+    "waveform",
+    "accent_hold",
+    "quality"
+   ]
+  },
+  {
+   "label": "DEVIL FISH",
+   "keys": [
+    "devil_fish",
+    "soft_attack",
+    "normal_decay",
+    "accent_decay",
+    "filter_tracking",
+    "overdrive",
+    "slide_time",
+    "filter_fm",
+    "sweep_speed",
+    "accent_sweep",
+    "muffler",
+    "sub_osc",
+    "sub_level",
+    "vco"
+   ]
+  }
+ ]
+}

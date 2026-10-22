@@ -639,16 +639,20 @@ struct Voice::Impl {
 			// logarithmic fall from the moment the gate ends (the 303 holds ~8 ms, then falls
 			// linearly over ~8 ms).
 			const double top = kV12 - 0.1;
-			const double tau = gateIn ? (accent ? 3e-3 : 0.3e-3 * std::pow(100.0, k.softAttack)) : 3e-3;
+			// SOFT ATTACK: 0.3 ms to 30 ms, about the 303's 3 ms at "2" (the manual's TB-303 setting).
+			const double sa = k.softAttack < 0.2 ? 0.3e-3 * std::pow(10.0, k.softAttack / 0.2)
+			                                     : 3e-3 * std::pow(10.0, (k.softAttack - 0.2) / 0.8);
+			const double tau = gateIn ? (accent ? 3e-3 : sa) : 3e-3;
 			gateDf += ((gateIn ? top : 0.0) - gateDf) * (1 - fastExp(-dt / tau));
 			gateInt = std::min(gateDf, std::max(0.0, top - iE31 * 10e3));
 		}
 
 		// --- MEG: C62 charged through D37 + R152 100R during the pulse, discharged through
 		// R138 68k + DECAY (1M A, shorted on accent) into the D28/D27/D26 string.
-		// Devil Fish: NORMAL and ACCENT DECAY pots, 30 ms to 3 s each (the 303's 68k gives
-		// 173 ms to 10 %; the time follows the resistance).
-		const double rDecay = df ? 68e3 * (30.0 / 173) * std::pow(100.0, accent ? k.accentDecay : k.normalDecay)
+		// Devil Fish: NORMAL and ACCENT DECAY pots, 30 ms to 3 s each, about the 303's ~200 ms
+		// near "2" to "2.7" (the manual's TB-303 settings). The 303's 68k gives 173 ms to 10 %;
+		// the time follows the resistance.
+		const double rDecay = df ? 68e3 * (30.0 / 173) * std::pow(100.0, std::pow(accent ? k.accentDecay : k.normalDecay, 0.6))
 		                         : 68e3 + (accent ? 0.0 : cal.decayPotOhms * decayTaper(k.decay, cal.decayTaperMid, cal.decayTaperShape));
 		const double c62F = cal.megCapUF * 1e-6;
 		oneShot = pulse > 0;

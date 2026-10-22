@@ -25,9 +25,9 @@ struct Controls {
 	bool devilFish = false;
 	double overdrive = 0;      // VCO level into the filter: 0 = normal (TD-3-MO), 1 = 66.6x
 	double slideTime = 0;      // 0 = the 303's 60 ms, 1 = 360 ms
-	double softAttack = 0.35;  // non-accented attack, 0.3 ms to 30 ms (exponential)
-	double normalDecay = 0.35; // MEG decay for normal notes, 30 ms to 3 s (exponential)
-	double accentDecay = 0.4;  // MEG decay for accented notes, 30 ms to 3 s
+	double softAttack = 0.2;   // non-accented attack, 0.3 ms to 30 ms (0.2: the 303's ~3 ms)
+	double normalDecay = 0.2;  // MEG decay for normal notes, 30 ms to 3 s (0.2: ~175 ms)
+	double accentDecay = 0.27; // MEG decay for accented notes, 30 ms to 3 s (0.27: ~250 ms)
 	double filterTracking = 0; // filter follows the CV: up to 2.7 kHz per volt above ~2 V
 	double filterFM = 0;       // VCA output into the filter frequency
 	int accentSweep = 2;       // 0: no accent sweep + high resonance, 1: sweep + high resonance, 2: normal
