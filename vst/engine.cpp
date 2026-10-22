@@ -271,6 +271,15 @@ void render(void *e, int16_t *out, int frames)
 {
 	Inst &t = *static_cast<Inst *>(e);
 	frames = std::min(frames, 128);
+#if defined(__aarch64__)
+	// Flush denormals to zero for this block (FPCR.FZ), restoring the host's setting after: armv7 NEON always does,
+	// aarch64 does not, and denormal arithmetic is far slower there
+	struct Ftz {
+		uint64_t saved;
+		Ftz() { asm volatile("mrs %0, fpcr" : "=r"(saved)); asm volatile("msr fpcr, %0" : : "r"(saved | (1ull << 24))); }
+		~Ftz() { asm volatile("msr fpcr, %0" : : "r"(saved)); }
+	} ftz;
+#endif
 	if (t.asleep) {
 		memset(out, 0, sizeof(int16_t) * 2 * size_t(frames));
 		return;
