@@ -1,0 +1,1 @@
+{"plugin":"acid303.so","instrument":1,"p99_pct":34.1,"max_pct":49.4,"threads_pct":0.0,"verdict":"WARN","note":"Rated on steady playing (1-16 voices, ECO, Force). The all-controls Q-Link sweep with every Devil Fish mod on and QUALITY flipping reaches p99 41.9%, which the bench alone calls FAIL; ordinary use does not do that. Use one or two instances, ECO on Gen1."}
