@@ -151,6 +151,8 @@ struct Voice::Impl {
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host / ctlDiv)
 	int ctlDiv = 1;                          // host samples per control step
+	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
+	                                                                           // first-order tanh correction leaves O(1e-12)
 	Calibration cal;
 
 	// ------------------------------------------------------------------ CV, slide (§2.2-2.3)
@@ -774,7 +776,7 @@ struct Voice::Impl {
 			}
 			// tanh at the updated state: after a converged step (|d| < 1e-10) the first-order
 			// correction is exact to well below double precision.
-			if (mx < 1e-10) {
+			if (mx < vcfTol) {
 				tc[0] = t0;
 				tc[1] = t1 + (1 - t1 * t1) * ((d[0] - d[1]) * kInv2Vt);
 				tc[2] = t2 + (1 - t2 * t2) * ((d[1] - d[2]) * kInv2Vt);
