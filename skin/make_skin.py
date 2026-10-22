@@ -286,20 +286,47 @@ def knob_body(r):
 _body = {}
 
 
+LIGHT = -45            # the light's direction, degrees from top (the top left)
+
+
 def knob_sprite(r, deg):
-    """The knob at deg from top: the fixed body (knob_body) with what turns drawn on it: the indicator groove across the
-    top (a dark cut with a light lower lip, so it reads as cut into the lit dome) and the red pointer at the skirt's rim."""
+    """The knob at deg from top: the fixed body (knob_body) with what turns drawn on it. The top's flat chamfer (the
+    303's and its clones' moulded facet, sloping down toward the pointer) is a plane cut by a chord just past the
+    centre: its shade follows how it faces the fixed light, brightest turned to the top left. Then the red pointer at
+    the skirt's rim."""
     body, rt = knob_body(r)
     im = body.copy()
     s = im.width
     c = s / 2
     R = r * SS
+    facing = math.cos(math.radians(deg - LIGHT))        # 1 toward the light, -1 away
+    # the facet: the cap's segment beyond a chord perpendicular to the pointer, a little past the centre
+    off = rt * 0.08
+    half = math.degrees(math.acos(-off / rt))           # the segment's half-angle seen from the centre
+    pts = [polar(c, c, rt - 0.5 * SS, deg - half + 2 * half * i / 40) for i in range(41)]
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).polygon(pts, fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(0.5 * SS))
+    v = int(66 + 34 * facing)
+    plane = Image.new("RGBA", (s, s), (v, v, v + 3, 255))
+    # a slope reads by a faint fall toward the rim
+    fall = Image.new("L", (s, s), 0)
+    fx, fy = polar(c, c, rt * 0.95, deg)
+    ImageDraw.Draw(fall).ellipse((fx - rt * 0.55, fy - rt * 0.55, fx + rt * 0.55, fy + rt * 0.55), fill=40)
+    fall = ImageChops.multiply(fall.filter(ImageFilter.GaussianBlur(rt * 0.35)), mask)
+    dark = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    dark.putalpha(fall)
+    facet = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    facet.paste(plane, (0, 0), mask)
+    im.alpha_composite(facet)
+    im.alpha_composite(dark)
+    # the ridge along the chord: lit where the plane turns from the light, a shadow line where it faces it
+    ax, ay = polar(c, c, rt - SS, deg - half)
+    bx, by = polar(c, c, rt - SS, deg + half)
     d = ImageDraw.Draw(im)
-    gx0, gy0 = polar(c, c, rt * 0.18, deg)
-    gx1, gy1 = polar(c, c, rt * 0.92, deg)
-    gw = max(2, int(r * 0.05 * SS))
-    d.line([(gx0 + 0.6 * SS, gy0 + 0.9 * SS), (gx1 + 0.6 * SS, gy1 + 0.9 * SS)], fill=(150, 150, 156, 200), width=gw)
-    d.line([(gx0, gy0), (gx1, gy1)], fill=(12, 12, 14, 255), width=gw)
+    ridge = (150, 150, 156, 200) if facing < 0 else (20, 20, 22, 220)
+    d.line([(ax, ay), (bx, by)], fill=ridge, width=max(1, int(1.1 * SS)))
+    # pointer on the skirt's rim, with a dark edge
     x0, y0 = polar(c, c, R * 0.73, deg)
     x1, y1 = polar(c, c, R * 0.97, deg)
     w = int(max(2.4, r * 0.085) * SS)
