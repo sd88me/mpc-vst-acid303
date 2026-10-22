@@ -1,13 +1,13 @@
 {
-  "name": "Model-303",
+  "name": "Acid-303",
   "vendor": "sd88me",
-  "uid": "M303",
+  "uid": "A303",
   "version": 1000,
   "targets": [
     "armv7",
     "aarch64"
   ],
-  "so": "model303.so",
+  "so": "acid303.so",
   "params": "params.json",
   "build": {
     "root": "..",
