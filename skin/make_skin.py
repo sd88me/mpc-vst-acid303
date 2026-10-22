@@ -49,14 +49,85 @@ def polar(cx, cy, r, deg):
 
 # ---------------------------------------------------------------- the plate
 
+# The module: a silver slab on the dark page, lit from the top left. Its face (screen px) and thickness:
+FACE = (12, 10, 1268, 604)
+DEPTH = 9
+RADIUS = 22
+
+
+def diag(w, h, lo, hi):
+    """A top-left (hi) to bottom-right (lo) gradient, L."""
+    gy = Image.linear_gradient("L").resize((w, h))                      # 0 top .. 255 bottom
+    gx = Image.linear_gradient("L").transpose(Image.Transpose.TRANSPOSE).resize((w, h))   # 0 left .. 255 right
+    g = ImageChops.add(gx, gy, 2.0)                                      # (x + y) / 2
+    return g.point(lambda v: int(hi + (lo - hi) * v / 255))
+
+
+def rounded_mask(size, box, r):
+    m = Image.new("L", size, 0)
+    ImageDraw.Draw(m).rounded_rectangle(box, radius=r, fill=255)
+    return m
+
+
 def plate(w, h):
-    """Satin silver: a soft top-to-bottom fall, a faint horizontal grain."""
-    g = Image.linear_gradient("L").resize((w, h))                       # 0 top .. 255 bottom
-    base = g.point(lambda v: int(219 - v * 22 / 255))
-    grain = Image.effect_noise((w // 8, h), 10).resize((w, h), Image.BILINEAR)
-    img = ImageChops.add(base, grain, 1.0, -128)
-    rgb = Image.merge("RGB", (img, img.point(lambda v: min(255, v + 1)), img.point(lambda v: min(255, v + 3))))
-    return rgb.convert("RGBA")
+    """The page: dark ground, the slab's shadow and edge, its brushed silver face with a bevel round it, four screws."""
+    page = Image.new("RGBA", (w, h))
+    pg = Image.linear_gradient("L").resize((w, h)).point(lambda v: 22 - v * 12 // 255)
+    page.paste(Image.merge("RGB", (pg, pg, pg.point(lambda v: v + 2))).convert("RGBA"))
+    x0, y0, x1, y1 = [v * SS for v in FACE]
+    R, D = RADIUS * SS, DEPTH * SS
+    # drop shadow under the slab, then its side (the face's depth, darker toward the bottom)
+    sh = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle((x0 + 6 * SS, y0 + 12 * SS, x1 + 6 * SS, y1 + D + 10 * SS), radius=R, fill=(0, 0, 0, 200))
+    page.alpha_composite(sh.filter(ImageFilter.GaussianBlur(10 * SS)))
+    side = Image.linear_gradient("L").resize((w, h)).point(lambda v: 150 - v * 90 // 255)
+    side_rgb = Image.merge("RGB", (side, side, side.point(lambda v: min(255, v + 4)))).convert("RGBA")
+    page.paste(side_rgb, (0, 0), rounded_mask((w, h), (x0, y0 + D, x1, y1 + D), R))
+    # the face: brushed grain, light from the top left, a soft vignette
+    fw, fh = x1 - x0, y1 - y0
+    base = diag(fw, fh, 188, 226)
+    grain = Image.effect_noise((fw // 10, fh), 12).resize((fw, fh), Image.BILINEAR)
+    face = ImageChops.add(base, grain, 1.0, -128)
+    vig = Image.radial_gradient("L").resize((fw, fh)).point(lambda v: max(0, v - 150) * 30 // 105)
+    face = ImageChops.subtract(face, vig)
+    face_rgb = Image.merge("RGB", (face, face.point(lambda v: min(255, v + 1)), face.point(lambda v: min(255, v + 4)))).convert("RGBA")
+    fm = rounded_mask((fw, fh), (0, 0, fw - 1, fh - 1), R)
+    page.paste(face_rgb, (x0, y0), fm)
+    # bevel: a band round the face's edge, bright where it faces the light and dark where it turns away
+    inner = rounded_mask((fw, fh), (5 * SS, 5 * SS, fw - 1 - 5 * SS, fh - 1 - 5 * SS), R - 5 * SS)
+    band = ImageChops.subtract(fm, inner).filter(ImageFilter.GaussianBlur(1.2 * SS))
+    light = diag(fw, fh, 60, 255)
+    hi_l = Image.new("RGBA", (fw, fh), (255, 255, 255, 0))
+    hi_l.putalpha(ImageChops.multiply(band, light.point(lambda v: max(0, v - 128) * 2)))
+    lo_l = Image.new("RGBA", (fw, fh), (0, 0, 0, 0))
+    lo_l.putalpha(ImageChops.multiply(band, light.point(lambda v: max(0, 128 - v) * 2)))
+    page.alpha_composite(hi_l, (x0, y0))
+    page.alpha_composite(lo_l, (x0, y0))
+    ImageDraw.Draw(page).rounded_rectangle((x0, y0, x1, y1), radius=R, outline=(70, 70, 74, 255), width=SS)
+    for cx, cy in ((34, 32), (1246, 32), (34, 590), (1246, 590)):
+        screw(page, cx, cy)
+    return page
+
+
+def screw(page, cx, cy, r=8):
+    s = (r + 6) * 2 * SS
+    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    c = s / 2
+    R = r * SS
+    sh = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse((c - R + 2 * SS, c - R + 3 * SS, c + R + 2 * SS, c + R + 3 * SS), fill=(0, 0, 0, 150))
+    im.alpha_composite(sh.filter(ImageFilter.GaussianBlur(1.5 * SS)))
+    head = diag(2 * R, 2 * R, 110, 238)
+    hm = Image.new("L", (2 * R, 2 * R), 0)
+    ImageDraw.Draw(hm).ellipse((0, 0, 2 * R - 1, 2 * R - 1), fill=255)
+    im.paste(Image.merge("RGB", (head,) * 3).convert("RGBA"), (int(c - R), int(c - R)), hm)
+    d = ImageDraw.Draw(im)
+    d.ellipse((c - R, c - R, c + R, c + R), outline=(80, 80, 84, 255), width=SS)
+    for a in (35, 125):
+        x0, y0 = polar(c, c, R * 0.62, a)
+        x1, y1 = polar(c, c, R * 0.62, a + 180)
+        d.line([(x0, y0), (x1, y1)], fill=(54, 54, 58, 255), width=int(1.8 * SS))
+    page.alpha_composite(im, (int(cx * SS - c), int(cy * SS - c)))
 
 
 def soft_shadow(size, box, blur=5, alpha=120, off=(0, 4), ellipse=True):
@@ -81,9 +152,14 @@ class Tab:
         return ImageDraw.Draw(self.hi)
 
     def text(self, x, y, s, size=17, weight="SemiBold", fill=INK, anchor="mm"):
+        # printed into the metal: a faint light edge below the ink
+        self.draw.text((x * SS, (y + 0.9) * SS), s, font=font(size, weight), fill=(255, 255, 255, 120), anchor=anchor)
         self.draw.text((x * SS, y * SS), s, font=font(size, weight), fill=fill, anchor=anchor)
 
-    def line(self, x0, y0, x1, y1, w=2, fill=INK):
+    def line(self, x0, y0, x1, y1, w=2, fill=INK, engraved=True):
+        if engraved:
+            self.draw.line([((x0 + 0.8) * SS, (y0 + 1) * SS), ((x1 + 0.8) * SS, (y1 + 1) * SS)], fill=(255, 255, 255, 130),
+                           width=max(1, int(round(w * SS))))
         self.draw.line([(x0 * SS, y0 * SS), (x1 * SS, y1 * SS)], fill=fill, width=max(1, int(round(w * SS))))
 
     def put(self, im, cx, cy):
@@ -92,9 +168,37 @@ class Tab:
     def header(self, cx, cy, w, label, h=28):
         """A section's title in its outlined box (the TEMPO / WAVE / VOLUME boxes)."""
         d = self.draw
+        d.rounded_rectangle(((cx - w / 2 + 0.8) * SS, (cy - h / 2 + 1) * SS, (cx + w / 2 + 0.8) * SS, (cy + h / 2 + 1) * SS), radius=7 * SS,
+                            outline=(255, 255, 255, 130), width=int(2.2 * SS))
         d.rounded_rectangle(((cx - w / 2) * SS, (cy - h / 2) * SS, (cx + w / 2) * SS, (cy + h / 2) * SS), radius=7 * SS,
                             outline=INK + (255,), width=int(2.2 * SS))
         self.text(cx, cy + 1, label, 19, "Bold")
+
+    def well(self, x0, y0, x1, y1, r=14):
+        """A section recessed into the plate: a slightly darker floor, its inner shadow on the top-left edges and a
+        light edge bottom-right where the plate catches the light."""
+        size = self.hi.size
+        box = (x0 * SS, y0 * SS, x1 * SS, y1 * SS)
+        m = Image.new("L", size, 0)
+        ImageDraw.Draw(m).rounded_rectangle(box, radius=r * SS, fill=255)
+        floor = Image.new("RGBA", size, (0, 0, 0, 0))
+        floor.putalpha(m.point(lambda v: v * 18 // 255))
+        self.hi.alpha_composite(floor)
+        # inner shadow: the well's mask, blurred and shifted down-right, outside of it subtracted
+        sh = ImageChops.offset(m, 3 * SS, 4 * SS).filter(ImageFilter.GaussianBlur(4 * SS))
+        inner = ImageChops.subtract(m, sh)
+        dark = Image.new("RGBA", size, (0, 0, 0, 0))
+        dark.putalpha(inner.point(lambda v: v * 110 // 255))
+        self.hi.alpha_composite(dark)
+        lit = Image.new("RGBA", size, (255, 255, 255, 0))
+        edge = ImageChops.subtract(ImageChops.offset(m, -2 * SS, -2 * SS), m).filter(ImageFilter.GaussianBlur(0.8 * SS))
+        lit.putalpha(ImageChops.subtract(m.point(lambda v: 0), edge.point(lambda v: 0)))
+        hl = Image.new("L", size, 0)
+        ImageDraw.Draw(hl).rounded_rectangle((box[0] + 2 * SS, box[1] + 2 * SS, box[2] + 2 * SS, box[3] + 2 * SS), radius=r * SS, outline=255, width=int(1.4 * SS))
+        hl = ImageChops.subtract(hl, m)
+        lit.putalpha(hl.point(lambda v: v * 150 // 255))
+        self.hi.alpha_composite(lit)
+        ImageDraw.Draw(self.hi).rounded_rectangle(box, radius=r * SS, outline=(96, 96, 100, 255), width=SS)
 
     def vrule(self, x, y0, y1):
         self.line(x, y0, x, y1, 2.2, (60, 60, 64))
@@ -112,46 +216,71 @@ class Tab:
 
 # ---------------------------------------------------------------- knobs
 
+def disc(size, box, fill_l, tint=(0, 0, 0)):
+    """An RGBA disc filled with a greyscale picture (a gradient), cut to the circle in box."""
+    x0, y0, x1, y1 = [int(v) for v in box]
+    w, h = x1 - x0, y1 - y0
+    im = Image.new("RGBA", size, (0, 0, 0, 0))
+    g = fill_l.resize((w, h))
+    rgb = Image.merge("RGB", (g.point(lambda v: min(255, v + tint[0])), g.point(lambda v: min(255, v + tint[1])), g.point(lambda v: min(255, v + tint[2]))))
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).ellipse((0, 0, w - 1, h - 1), fill=255)
+    im.paste(rgb.convert("RGBA"), (x0, y0), m)
+    return im
+
+
 def knob_sprite(r, deg):
-    """The knob, hi-res RGBA, turned deg from top: a knurled charcoal skirt with the red pointer at its rim, and a flat
-    top lit on one side of the pointer's line (it turns with the knob, as the moulded cap's facet does)."""
+    """The knob, hi-res RGBA, turned deg from top, lit from the top left: a knurled charcoal skirt with a bright rim
+    where it meets the light and the red pointer at its edge, a stepped flat top with a sheen, and the cap's facet on one
+    side of the pointer's line (it turns with the knob). The light, highlights and shading stay put as it turns."""
     R = r * SS
-    s = int(2 * R + 8 * SS)
+    s = int(2 * R + 10 * SS)
     c = s / 2
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    # skirt: shaded from the light, knurls, a rim highlight on the lit side
+    im.alpha_composite(disc((s, s), (c - R, c - R, c + R, c + R), diag(64, 64, 14, 70)))
     d = ImageDraw.Draw(im)
-    # skirt: dark disc, a lighter bevel ring, knurls
-    d.ellipse((c - R, c - R, c + R, c + R), fill=(30, 30, 32, 255))
-    d.ellipse((c - R + 1.5 * SS, c - R + 1.5 * SS, c + R - 1.5 * SS, c + R - 1.5 * SS), outline=(74, 74, 78, 255), width=int(1.4 * SS))
-    for i in range(48):
-        a = 360 * i / 48
-        x0, y0 = polar(c, c, R * 0.80, a)
-        x1, y1 = polar(c, c, R * 0.95, a)
-        d.line([(x0, y0), (x1, y1)], fill=(52, 52, 56, 255), width=max(1, int(1.2 * SS)))
-    # step down to the top
-    rt = R * 0.70
-    d.ellipse((c - rt - 2 * SS, c - rt - 2 * SS, c + rt + 2 * SS, c + rt + 2 * SS), fill=(22, 22, 24, 255))
-    top = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    td = ImageDraw.Draw(top)
-    td.ellipse((c - rt, c - rt, c + rt, c + rt), fill=(58, 58, 62, 255))
-    # the lit facet: the half on the pointer's left (light from the top-left), a soft edge
+    for i in range(60):
+        a = 360 * i / 60
+        lit = 0.5 + 0.5 * math.cos(math.radians(a + 45))       # brighter facing the top left
+        x0, y0 = polar(c, c, R * 0.78, a)
+        x1, y1 = polar(c, c, R * 0.97, a)
+        v = int(30 + 50 * lit)
+        d.line([(x0, y0), (x1, y1)], fill=(v, v, v + 3, 255), width=max(1, int(1.3 * SS)))
+    rim = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(rim).arc((c - R + SS, c - R + SS, c + R - SS, c + R - SS), start=180, end=300, fill=(230, 230, 236, 170), width=int(1.6 * SS))
+    im.alpha_composite(rim.filter(ImageFilter.GaussianBlur(0.8 * SS)))
+    # the step to the top: a dark ring with its shadow falling down-right
+    rt = R * 0.68
+    st = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(st).ellipse((c - rt + 1.5 * SS, c - rt + 3 * SS, c + rt + 1.5 * SS, c + rt + 3 * SS), fill=(0, 0, 0, 200))
+    im.alpha_composite(st.filter(ImageFilter.GaussianBlur(2 * SS)))
+    # the top: gradient, the turning facet, a fixed sheen
+    top = disc((s, s), (c - rt, c - rt, c + rt, c + rt), diag(64, 64, 38, 92))
     facet = Image.new("L", (s, s), 0)
-    fd = ImageDraw.Draw(facet)
-    fd.pieslice((c - rt, c - rt, c + rt, c + rt), start=deg - 90 - 180, end=deg - 90, fill=255)
-    facet = facet.filter(ImageFilter.GaussianBlur(0.8 * SS))
-    lit = Image.new("RGBA", (s, s), (96, 96, 100, 255))
-    top = Image.composite(lit, top, ImageChops.multiply(facet, top.getchannel("A")))
+    ImageDraw.Draw(facet).pieslice((c - rt, c - rt, c + rt, c + rt), start=deg - 270, end=deg - 90, fill=255)
+    facet = ImageChops.multiply(facet.filter(ImageFilter.GaussianBlur(0.7 * SS)), top.getchannel("A"))
+    lighter = disc((s, s), (c - rt, c - rt, c + rt, c + rt), diag(64, 64, 70, 128))
+    top = Image.composite(lighter, top, facet)
     im.alpha_composite(top)
-    # pointer on the skirt's rim
-    x0, y0 = polar(c, c, R * 0.74, deg)
+    ImageDraw.Draw(im).ellipse((c - rt, c - rt, c + rt, c + rt), outline=(16, 16, 18, 255), width=SS)
+    sheen = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(sheen).ellipse((c - rt * 0.78, c - rt * 0.86, c + rt * 0.05, c - rt * 0.12), fill=(255, 255, 255, 46))
+    im.alpha_composite(sheen.filter(ImageFilter.GaussianBlur(4 * SS)))
+    # pointer on the skirt's rim, with a dark edge
+    x0, y0 = polar(c, c, R * 0.73, deg)
     x1, y1 = polar(c, c, R * 0.97, deg)
+    w = int(max(2.4, r * 0.085) * SS)
     d = ImageDraw.Draw(im)
-    d.line([(x0, y0), (x1, y1)], fill=RED + (255,), width=int(max(2.4, r * 0.085) * SS))
+    d.line([(x0, y0), (x1, y1)], fill=(90, 10, 8, 255), width=w + 2 * SS // 2)
+    d.line([(x0, y0), (x1, y1)], fill=RED + (255,), width=w)
     return im
 
 
 def knob_shadow(t, cx, cy, r):
-    t.hi.alpha_composite(soft_shadow(t.hi.size, ((cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS), 4, 120, (1, 4)))
+    """The knob's shadow on the plate: a soft one cast down-right, and a tight contact one."""
+    t.hi.alpha_composite(soft_shadow(t.hi.size, ((cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS), 7, 150, (5, 8)))
+    t.hi.alpha_composite(soft_shadow(t.hi.size, ((cx - r) * SS, (cy - r) * SS, (cx + r) * SS, (cy + r) * SS), 2, 170, (1, 2)))
 
 
 def add_knob(t, key, cx, cy, r, name=None, ring=None, name_dy=None, ticks=11, vs=0, bw=None):
@@ -207,9 +336,13 @@ def button_sprite(lit, d=40, color=RED):
         glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
         ImageDraw.Draw(glow).ellipse((c - D / 2 - 4 * SS, c - D / 2 - 4 * SS, c + D / 2 + 4 * SS, c + D / 2 + 4 * SS), fill=(255, 70, 50, 150))
         im.alpha_composite(glow.filter(ImageFilter.GaussianBlur(6 * SS)))
+    sh = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse((c - D / 2 + 3 * SS, c - D / 2 + 5 * SS, c + D / 2 + 3 * SS, c + D / 2 + 5 * SS), fill=(0, 0, 0, 150))
+    im.alpha_composite(sh.filter(ImageFilter.GaussianBlur(3 * SS)))
+    im.alpha_composite(disc((s, s), (c - D / 2, c - D / 2, c + D / 2, c + D / 2), diag(64, 64, 96, 236)))     # chrome bezel
+    im.alpha_composite(disc((s, s), (c - D / 2 * 0.86, c - D / 2 * 0.86, c + D / 2 * 0.86, c + D / 2 * 0.86), diag(64, 64, 20, 50)))
     dr = ImageDraw.Draw(im)
-    dr.ellipse((c - D / 2, c - D / 2, c + D / 2, c + D / 2), fill=(40, 40, 44, 255))
-    rc = D / 2 * 0.80
+    rc = D / 2 * 0.74
     base = color if lit else tuple(int(v * 0.62) for v in color)
     dr.ellipse((c - rc, c - rc, c + rc, c + rc), fill=base + (255,))
     hl = Image.new("RGBA", (s, s), (0, 0, 0, 0))
