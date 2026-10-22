@@ -4,8 +4,8 @@ A TB-303 bass synthesizer for the Akai MPC and Force standalone, built as a nati
 component-level **circuit model** of the original: the same transistors, diodes, capacitors and pots as Roland's
 service-notes schematic. It also has the full set of **Devil Fish** mods, which you can switch in or out.
 
-![303 tab](docs/screenshot-303.png)
-![Devil Fish tab](docs/screenshot-devil-fish.png)
+![303 tab, on a Force](docs/device-303.png)
+![Devil Fish tab, on a Force](docs/device-devil-fish.png)
 
 ## Where it comes from
 
