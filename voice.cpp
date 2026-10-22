@@ -107,8 +107,11 @@ struct Diode {
 		if (v <= 0)
 			return v;
 		for (int i = 0; i < 30; ++i) {
-			const double f = vd + current(vd) * r - v;
-			const double df = 1 + slope(vd) * r;
+			// current() and slope() share one exponential.
+			const double a = vd / nvt, e = fastExp(std::min(a, 40.0));
+			const double cur = is * ((a > 40 ? e * (1 + a - 40) : e) - 1);
+			const double f = vd + cur * r - v;
+			const double df = 1 + is / nvt * e * r;
 			const double step = f / df;
 			vd -= step;
 			if (vd > v)
@@ -126,6 +129,12 @@ constexpr Diode kSignalDiode{4e-9, 1.9 * kVt}; // 1S1588/1N4148 class
 double junctionExpm1(double a)
 {
 	return a < -40 ? -1.0 : fastExpm1(std::min(a, 40.0));
+}
+
+// d/da of junctionExpm1(a): exp(a), zero where junctionExpm1 is flat (below -40, above 40).
+double junctionSlope(double a)
+{
+	return a < -40 || a > 40 ? 0.0 : fastExp(a);
 }
 
 // (1 + p)^(-1/n) for p >= 0: the binomial series to p^5 while p < 0.02 (relative error under
@@ -860,7 +869,9 @@ struct Voice::Impl {
 			double vD = 0;
 			double v = vb32;
 			for (int it = 0; it < 30; ++it) {
-				const auto net = [&](double x) {
+				// The base current's slope comes with its exponentials (dIB); the one-shot's
+				// diode path, live only for the 1.3 ms pulse, keeps a finite difference.
+				const auto net = [&](double x, double *dIB) {
 					double i134 = 0;
 					if (oneShot) {
 						const double drive = 11.7 - x; // Q38 saturated
@@ -869,13 +880,19 @@ struct Voice::Impl {
 							i134 = std::max(0.0, (drive - vD) / 22e3);
 						}
 					}
-					const double iB = is / bf * junctionExpm1((x - vE) / kVt) +
-					                  is / br * junctionExpm1((x - c42) / kVt);
+					const double aE = (x - vE) / kVt, aC = (x - c42) / kVt;
+					const double iB = is / bf * junctionExpm1(aE) + is / br * junctionExpm1(aC);
+					if (dIB != nullptr)
+						*dIB = (is / bf * junctionSlope(aE) + is / br * junctionSlope(aC)) / kVt;
 					return x - vb32 - dt / 0.1e-6 * (i134 - iB);
 				};
-				const double fv = net(v);
-				const double dv = 1e-6;
-				const double slope = (net(v + dv) - fv) / dv;
+				double dIB = 0;
+				const double fv = net(v, &dIB);
+				double slope = 1 + dt / 0.1e-6 * dIB;
+				if (oneShot) {
+					const double dv = 1e-6;
+					slope = (net(v + dv, nullptr) - fv) / dv;
+				}
 				const double step = std::clamp(fv / slope, -0.05, 0.05);
 				v -= step;
 				if (std::abs(step) < 1e-9)
@@ -887,19 +904,29 @@ struct Voice::Impl {
 		}
 		// C42 (Q31's base current flows out into it): g(V) rises with V.
 		{
-			const auto iC32 = [&](double vN) {
-				const double iCC = is * junctionExpm1((vb32 - vE) / kVt);
-				const double iEC = is * junctionExpm1((vb32 - vN) / kVt);
+			// Q32's collector current into node N and its slope (dI) against V_N; iCC doesn't
+			// depend on V_N.
+			const double iCC = is * junctionExpm1((vb32 - vE) / kVt);
+			const auto iC32 = [&](double vN, double &dI) {
+				const double aEC = (vb32 - vN) / kVt;
+				const double iEC = is * junctionExpm1(aEC);
 				const double i = iCC - iEC * (1 + 1 / br);
+				const double di = (1 + 1 / br) * is * junctionSlope(aEC) / kVt;
 				const double iR = std::max(vN - vE, 0.0) / 200 + 1e-12;
-				return i > 0 ? i * iR / (i + iR) : i;
+				const double diR = vN > vE ? 1 / 200.0 : 0.0;
+				if (i > 0) {
+					const double sum = i + iR;
+					dI = (di * iR * iR + diR * i * i) / (sum * sum);
+					return i * iR / sum;
+				}
+				dI = di;
+				return i;
 			};
-			const auto g = [&](double vN) { return vN - c42 - dt / 1e-6 * ((kV12 - vN) / 1.5e6 + iB31 - iC32(vN)); };
 			double v = c42;
 			for (int it = 0; it < 30; ++it) {
-				const double gv = g(v);
-				const double dv = 1e-6;
-				const double slope = (g(v + dv) - gv) / dv;
+				double dI;
+				const double gv = v - c42 - dt / 1e-6 * ((kV12 - v) / 1.5e6 + iB31 - iC32(v, dI));
+				const double slope = 1 + dt / 1e-6 * (1 / 1.5e6 + dI);
 				const double step = std::clamp(gv / slope, -0.5, 0.5);
 				v -= step;
 				if (std::abs(step) < 1e-9)
