@@ -13,13 +13,13 @@ def logo(t, sub):
     size = 46
     f = m.font(size, "Logo")
     x = 60
-    t.text(x, 52, NAME[0], size, "Logo", INK, "lm")
+    t.text(x, 66, NAME[0], size, "Logo", INK, "lm")
     x += f.getlength(NAME[0]) / m.SS + 8
     dash = 22
     for dy, col in ((1, (255, 255, 255, 120)), (0, INK + (255,))):
-        t.draw.rectangle((x * m.SS, (50 - 3.5 + dy) * m.SS, (x + dash) * m.SS, (50 + 3.5 + dy) * m.SS), fill=col)
-    t.text(x + dash + 8, 52, NAME[1], size, "Logo", INK, "lm")
-    t.text(1218, 54, sub, 19, "Bold", DIM, "rm")      # the tagline at the top right, level with the wordmark
+        t.draw.rectangle((x * m.SS, (64 - 3.5 + dy) * m.SS, (x + dash) * m.SS, (64 + 3.5 + dy) * m.SS), fill=col)
+    t.text(x + dash + 8, 66, NAME[1], size, "Logo", INK, "lm")
+    t.text(1218, 67, sub, 19, "Bold", DIM, "rm")      # the tagline at the top right, level with the wordmark
 
 
 def saw_icon(t, x, y, s=9):
