@@ -8,7 +8,16 @@ K = m.add_knob
 
 
 def logo(t, sub):
-    t.text(60, 52, "MODEL-303", 44, "Bold", INK, "lm")
+    # Earth Normal has no dash: MODEL and 303 set apart, the dash drawn between them at the letters' weight
+    size = 46
+    f = m.font(size, "Logo")
+    x = 60
+    t.text(x, 52, "MODEL", size, "Logo", INK, "lm")
+    x += f.getlength("MODEL") / m.SS + 8
+    dash = 22
+    for dy, col in ((1, (255, 255, 255, 120)), (0, INK + (255,))):
+        t.draw.rectangle((x * m.SS, (50 - 3.5 + dy) * m.SS, (x + dash) * m.SS, (50 + 3.5 + dy) * m.SS), fill=col)
+    t.text(x + dash + 8, 52, "303", size, "Logo", INK, "lm")
     t.text(62, 88, sub, 19, "Medium", DIM, "lm")
 
 

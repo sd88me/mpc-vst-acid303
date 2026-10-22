@@ -34,10 +34,14 @@ LABEL_FONT = "Univers_53_Extended_Regular.otf"   # the Acid plugin's label face;
 SCALE = 0.78                                      # it runs wide: sizes are given for a semi-condensed face
 
 
+LOGO_FONT = "Earth_Normal.ttf"                   # the Acid plugin's wordmark face
+
+
 def font(size, weight="SemiBold"):
-    k = size
+    logo = weight == "Logo"
+    k = (size, logo)
     if k not in FONTS:
-        FONTS[k] = ImageFont.truetype(os.path.join(A, LABEL_FONT), int(round(size * SCALE * SS)))
+        FONTS[k] = ImageFont.truetype(os.path.join(A, LOGO_FONT if logo else LABEL_FONT), int(round(size * (1 if logo else SCALE) * SS)))
     return FONTS[k]
 
 
@@ -239,20 +243,22 @@ def disc(size, box, fill_l, tint=(0, 0, 0)):
     return im
 
 
-def knob_sprite(r, deg):
-    """The knob, hi-res RGBA, turned deg from top, lit from the top left: a knurled charcoal skirt with a bright rim
-    where it meets the light and the red pointer at its edge, a stepped flat top with a sheen, and the cap's facet on one
-    side of the pointer's line (it turns with the knob). The light, highlights and shading stay put as it turns."""
+def knob_body(r):
+    """Everything about the knob that doesn't turn, hi-res RGBA, lit from the top left: the knurled skirt (it is round,
+    so it looks the same at any angle) with its rim highlight, the step and the domed top with its sheen. Made once per
+    size; each frame adds only what turns."""
+    key = ("body", r)
+    if key in _body:
+        return _body[key]
     R = r * SS
     s = int(2 * R + 10 * SS)
     c = s / 2
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    # skirt: shaded from the light, knurls, a rim highlight on the lit side
     im.alpha_composite(disc((s, s), (c - R, c - R, c + R, c + R), diag(64, 64, 14, 70)))
     d = ImageDraw.Draw(im)
     for i in range(60):
         a = 360 * i / 60
-        lit = 0.5 + 0.5 * math.cos(math.radians(a + 45))       # brighter facing the top left
+        lit = 0.5 + 0.5 * math.cos(math.radians(a + 45))
         x0, y0 = polar(c, c, R * 0.78, a)
         x1, y1 = polar(c, c, R * 0.97, a)
         v = int(30 + 50 * lit)
@@ -260,29 +266,44 @@ def knob_sprite(r, deg):
     rim = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ImageDraw.Draw(rim).arc((c - R + SS, c - R + SS, c + R - SS, c + R - SS), start=180, end=300, fill=(230, 230, 236, 170), width=int(1.6 * SS))
     im.alpha_composite(rim.filter(ImageFilter.GaussianBlur(0.8 * SS)))
-    # the step to the top: a dark ring with its shadow falling down-right
     rt = R * 0.68
     st = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ImageDraw.Draw(st).ellipse((c - rt + 1.5 * SS, c - rt + 3 * SS, c + rt + 1.5 * SS, c + rt + 3 * SS), fill=(0, 0, 0, 200))
     im.alpha_composite(st.filter(ImageFilter.GaussianBlur(2 * SS)))
-    # the top: gradient, the turning facet, a fixed sheen
-    top = disc((s, s), (c - rt, c - rt, c + rt, c + rt), diag(64, 64, 38, 92))
-    facet = Image.new("L", (s, s), 0)
-    ImageDraw.Draw(facet).pieslice((c - rt, c - rt, c + rt, c + rt), start=deg - 270, end=deg - 90, fill=255)
-    facet = ImageChops.multiply(facet.filter(ImageFilter.GaussianBlur(0.7 * SS)), top.getchannel("A"))
-    lighter = disc((s, s), (c - rt, c - rt, c + rt, c + rt), diag(64, 64, 70, 128))
-    top = Image.composite(lighter, top, facet)
-    im.alpha_composite(top)
+    # the top: a shallow dome, bright toward the light, with a soft specular patch and a darker far edge
+    im.alpha_composite(disc((s, s), (c - rt, c - rt, c + rt, c + rt), diag(64, 64, 34, 104)))
+    edge = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(edge).arc((c - rt + SS, c - rt + SS, c + rt - SS, c + rt - SS), start=0, end=110, fill=(0, 0, 0, 120), width=int(3 * SS))
+    im.alpha_composite(edge.filter(ImageFilter.GaussianBlur(2 * SS)))
     ImageDraw.Draw(im).ellipse((c - rt, c - rt, c + rt, c + rt), outline=(16, 16, 18, 255), width=SS)
     sheen = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    ImageDraw.Draw(sheen).ellipse((c - rt * 0.78, c - rt * 0.86, c + rt * 0.05, c - rt * 0.12), fill=(255, 255, 255, 46))
+    ImageDraw.Draw(sheen).ellipse((c - rt * 0.72, c - rt * 0.80, c + rt * 0.02, c - rt * 0.16), fill=(255, 255, 255, 70))
     im.alpha_composite(sheen.filter(ImageFilter.GaussianBlur(4 * SS)))
-    # pointer on the skirt's rim, with a dark edge
+    _body[key] = (im, rt)
+    return _body[key]
+
+
+_body = {}
+
+
+def knob_sprite(r, deg):
+    """The knob at deg from top: the fixed body (knob_body) with what turns drawn on it: the indicator groove across the
+    top (a dark cut with a light lower lip, so it reads as cut into the lit dome) and the red pointer at the skirt's rim."""
+    body, rt = knob_body(r)
+    im = body.copy()
+    s = im.width
+    c = s / 2
+    R = r * SS
+    d = ImageDraw.Draw(im)
+    gx0, gy0 = polar(c, c, rt * 0.18, deg)
+    gx1, gy1 = polar(c, c, rt * 0.92, deg)
+    gw = max(2, int(r * 0.05 * SS))
+    d.line([(gx0 + 0.6 * SS, gy0 + 0.9 * SS), (gx1 + 0.6 * SS, gy1 + 0.9 * SS)], fill=(150, 150, 156, 200), width=gw)
+    d.line([(gx0, gy0), (gx1, gy1)], fill=(12, 12, 14, 255), width=gw)
     x0, y0 = polar(c, c, R * 0.73, deg)
     x1, y1 = polar(c, c, R * 0.97, deg)
     w = int(max(2.4, r * 0.085) * SS)
-    d = ImageDraw.Draw(im)
-    d.line([(x0, y0), (x1, y1)], fill=(90, 10, 8, 255), width=w + 2 * SS // 2)
+    d.line([(x0, y0), (x1, y1)], fill=(90, 10, 8, 255), width=w + SS)
     d.line([(x0, y0), (x1, y1)], fill=RED + (255,), width=w)
     return im
 
