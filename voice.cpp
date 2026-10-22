@@ -11,6 +11,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -84,6 +87,46 @@ inline double fastTanh(double x)
 }
 inline double fastExpm1(double x) { return fastExp(x) - 1; }
 inline double fastLog1p(double x) { return std::log(1 + x); }
+
+// Four tanh at once in float (NEON on ARM, SSE on x86 through GCC's vector extensions), for the
+// ladder's Newton iteration: float's ~1e-7 is far below what the VCF's 1e-6 V tolerance
+// resolves. exp by 2^n times a degree-5 polynomial on |r| < ln2/2 (Cephes' expf), tanh as
+// (e^2x - 1)/(e^2x + 1) with the reciprocal refined from the hardware estimate on ARM.
+typedef float v4f __attribute__((vector_size(16)));
+typedef int v4i __attribute__((vector_size(16)));
+
+inline v4f tanh4(v4f x)
+{
+	const v4f lim = {9, 9, 9, 9};
+	x = x > lim ? lim : x;
+	x = x < -lim ? -lim : x;
+	const v4f y = x + x;
+	// e = 2^n e^r, n = round(y log2 e), r = y - n ln2 (split in two for precision)
+	const v4f fn = y * 1.44269504088896341f + 0.5f;
+	v4i n = __builtin_convertvector(fn, v4i);
+	n -= __builtin_convertvector(fn < __builtin_convertvector(n, v4f), v4i) ? 1 : 0; // floor
+	const v4f nf = __builtin_convertvector(n, v4f);
+	const v4f r = y - nf * 0.693359375f + nf * 2.12194440e-4f;
+	v4f p = r * 1.9875691500e-4f + 1.3981999507e-3f;
+	p = p * r + 8.3334519073e-3f;
+	p = p * r + 4.1665795894e-2f;
+	p = p * r + 1.6666665459e-1f;
+	p = p * r + 5.0000001201e-1f;
+	p = p * r * r + r + 1.0f;
+	const v4i bits = (n + 127) << 23;
+	v4f scale;
+	std::memcpy(&scale, &bits, sizeof scale);
+	const v4f e = p * scale;
+	const v4f den = e + 1.0f;
+#ifdef __ARM_NEON
+	v4f q = vrecpeq_f32(den);
+	q = q * vrecpsq_f32(den, q);
+	q = q * vrecpsq_f32(den, q);
+	return (e - 1.0f) * q;
+#else
+	return (e - 1.0f) / den;
+#endif
+}
 
 // Diode current for voltage v (Shockley, with the exponent limited so Newton stays sane).
 struct Diode {
@@ -751,13 +794,6 @@ struct Voice::Impl {
 		constexpr double div = 2.2 / 12.2;
 		const double A = div * a23 * loopFollower * a15 * resWiper * a14 * ampGain;
 		const double B = div * (a23 * loopFollower * (a15 * resWiper * b14 + b15) + b23);
-		auto feedback = [&](double u4, double &dfb) {
-			const double w = aW * u4 + bW;
-			const double t = fastTanh(w * kInv2Vt);
-			dfb = A * (1 - t * t) * kInv2Vt * aW;
-			return A * t + B;
-		};
-
 		// Trapezoidal step, Newton on u1..u4, starting from an Adams-Bashforth step (about one
 		// iteration fewer than starting from u; the tolerance is the same).
 		double un[4];
@@ -767,14 +803,17 @@ struct Voice::Impl {
 		double x = 0, tc[5];
 		bool converged = false;
 		for (int it = 0; it < 6; ++it) {
-			double dfb;
-			const double fb = feedback(un[3], dfb);
+			// The feedback amplifier's tanh with stages 1-3, then the input pair's with stage 4.
+			const v4f a = {float((aW * un[3] + bW) * kInv2Vt), float((un[0] - un[1]) * kInv2Vt),
+			               float((un[1] - un[2]) * kInv2Vt), float((un[2] - un[3]) * kInv2Vt)};
+			const v4f ta = tanh4(a);
+			const double tf = ta[0];
+			const double dfb = A * (1 - tf * tf) * kInv2Vt * aW;
+			const double fb = A * tf + B;
 			x = xIn - fb;
-			const double t0 = fastTanh(x * kInv2Vt);
-			const double t1 = fastTanh((un[0] - un[1]) * kInv2Vt);
-			const double t2 = fastTanh((un[1] - un[2]) * kInv2Vt);
-			const double t3 = fastTanh((un[2] - un[3]) * kInv2Vt);
-			const double t4 = fastTanh(un[3] * kInv2Vt);
+			const v4f b = {float(x * kInv2Vt), float(un[3] * kInv2Vt), 0, 0};
+			const v4f tb = tanh4(b);
+			const double t0 = tb[0], t1 = ta[1], t2 = ta[2], t3 = ta[3], t4 = tb[1];
 			// The top node also feeds Q21 through C25/C27: w/rLoad leaves C26.
 			const double iLC = (aW * un[3] + bW) * gTop; // i_L / C26
 			const double f[4] = {kc[0] * (t0 - t1), kc[1] * (t1 - t2), kc[2] * (t2 - t3), kc[3] * (t3 - t4) - iLC};
