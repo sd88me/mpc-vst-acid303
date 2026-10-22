@@ -386,7 +386,9 @@ struct Voice::Impl {
 		hv = 1 / fsv;
 		fsc = host;
 		hc = 1 / fsc;
-		vcoDown.setStages(vcoRatio == 4 ? 2 : 1, kVcoTaps);
+		// At 4x, the first stage (to 176.4/192 kHz) only has to stop what would fold below 20 kHz
+		// (172-192 kHz): 4 taps a side are 70 dB down there, on harmonics already 65 dB down.
+		vcoDown.setStages(vcoRatio == 4 ? 2 : 1, kVcoTaps, 4);
 		vcoDelayLen = std::clamp(int(std::lround((63.0 / 384e3 - vcoDown.latency() / fs) * fsv)), 0, kVcoDelayMax);
 		vcoDelayPos = 0;
 		hpC14.set(1 / (2 * kPi * 1e-6 * 50e3), fs);           // 3.2 Hz
