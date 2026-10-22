@@ -126,8 +126,8 @@ static double spectralCompare(const char *name, const std::vector<float> &ref, c
 	std::vector<double> ea, eb;
 	const auto a = bandFrames(ref, ea), b = bandFrames(out, eb);
 	const double emax = *std::max_element(ea.begin(), ea.end());
-	double sum = 0, worst = 0, lvl = 0, lvlMax = 0;
-	int cnt = 0;
+	double sum = 0, worst = 0, lvl = 0, lvlMax = 0, worstRel = 0;
+	int cnt = 0, worstFrame = 0;
 	for (size_t f = 0; f < a.size(); ++f) {
 		if (ea[f] < emax * 1e-6)
 			continue;
@@ -140,12 +140,17 @@ static double spectralCompare(const char *name, const std::vector<float> &ref, c
 		}
 		const double l = std::sqrt(acc), le = std::abs(10 * std::log10(ea[f] / eb[f]));
 		sum += l;
-		worst = std::max(worst, l);
+		if (l > worst) {
+			worst = l;
+			worstFrame = int(f);
+			worstRel = 10 * std::log10(ea[f] / emax);
+		}
 		lvl += le;
 		lvlMax = std::max(lvlMax, le);
 		++cnt;
 	}
-	printf("%-12s LSD mean %.3f dB  max %.3f  level mean %.3f dB  max %.3f\n", name, sum / cnt, worst, lvl / cnt, lvlMax);
+	printf("%-12s LSD mean %.3f dB  max %.3f (at %.2f s, %.0f dB under the loudest frame)  level mean %.3f dB  max %.3f\n", name, sum / cnt,
+	       worst, worstFrame * 512 / 48000.0, -worstRel, lvl / cnt, lvlMax);
 	return sum / cnt;
 }
 

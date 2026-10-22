@@ -192,6 +192,8 @@ struct Voice::Impl {
 	double fsv = 352800, hv = 1 / 352800.0; // VCO rate (2x internal)
 	double fsc = 44100, hc = 1 / 44100.0;   // control rate (host / ctlDiv)
 	int ctlDiv = 1;                          // host samples per control step
+	double pin1Vj = 0;                       // solvePin1's junction voltage, the next step's start
+	double pin1Tol = getenv("TB_P1TOL") ? atof(getenv("TB_P1TOL")) : 1e-9; // its Newton tolerance (V): 4e-8 of the current
 	double vcfTol = getenv("TB_TOL") ? atof(getenv("TB_TOL")) : 1e-6; // Newton step that ends the VCF iteration (V): the
 	                                                                           // first-order tanh correction leaves O(1e-12)
 	Calibration cal;
@@ -957,40 +959,63 @@ struct Voice::Impl {
 		// given; iEC is the base-collector junction's transport current.
 		constexpr double is31 = 3.3e-14, bf31 = 300, br31 = 5;
 		double iC = 0, iD = 0, iEC = 0;
-		// Pin 1's current i balances Q31's collector and D27: f(i) falls with i.
-		const auto f = [&](double i) {
-			const double vP = kVt * fastLog1p(i / 5e-16) + 450 * i + cal.pin1ShiftV;
-			iEC = is31 * junctionExpm1((vP - c42) / kVt);
+		// Pin 1's current balances Q31's collector and D27. Solved in the voltage across pin 1's
+		// junction, vj (i = I_S expm1(vj/V_T), V_pin1 = vj + 450 i + shift), where every term is an
+		// explicit, smooth function: in the current itself V_pin1 is logarithmic, and near zero
+		// current (the accent's C36 discharging through D27 after the gate) Newton's steps there
+		// are tiny long before the root, which stops a tolerance on the step early.
+		// f(vj) falls with vj; df is its slope.
+		constexpr double isP = 5e-16;
+		double i = 0;
+		const auto f = [&](double vj, double &df) {
+			const double e = fastExp(std::min(vj / kVt, 60.0));
+			i = isP * (e - 1);
+			const double di = isP * e / kVt;
+			const double vP = vj + 450 * i + cal.pin1ShiftV;
+			const double dvP = 1 + 450 * di;
+			const double aEC = (vP - c42) / kVt;
+			iEC = is31 * junctionExpm1(aEC);
+			const double diEC = is31 * junctionSlope(aEC) / kVt * dvP;
 			iC = (iE + iEC) / (1 + 1 / bf31) - iEC * (1 + 1 / br31);
+			double diD = 0;
 			const double drive = c36 - vP;
 			iD = 0;
 			if (drive > 0) {
 				vdD27 = kSignalDiode.solve(drive, 22e3, vdD27);
 				iD = std::max(0.0, (drive - vdD27) / 22e3);
+				if (iD > 0)
+					diD = -dvP / (22e3 + kSignalDiode.nvt / (iD + kSignalDiode.is));
 			}
+			df = diEC * (1 / (1 + 1 / bf31) - (1 + 1 / br31)) + diD - di;
 			return iC + iD - i;
 		};
-		double lo = 0, hi = iE + iAcc + 1e-6;
-		for (int k = 0; k < 60 && f(hi) > 0; ++k)
-			hi *= 2;
-		double i = std::clamp(iAbcNow, lo, hi);
-		for (int it = 0; it < 40; ++it) {
-			const double fi = f(i);
-			if (fi > 0)
-				lo = i;
+		// Newton from last step's voltage inside a bracket: f(0) >= 0 (no pin current; Q31's and
+		// D27's are not negative there), and the pin current can't exceed what Q31's emitter and
+		// C36 can supply, so f < 0 above that. Bisection when a step leaves the bracket.
+		double lo = 0, hi = kVt * std::log1p((iE + std::max(c36, 0.0) / 22e3 + 1e-9) / isP);
+		double vj = std::clamp(pin1Vj, lo, hi);
+		for (int it = 0; it < 60; ++it) {
+			double slope;
+			const double fv = f(vj, slope);
+			if (fv == 0)
+				break;
+			if (fv > 0)
+				lo = vj;
 			else
-				hi = i;
-			const double di = 1e-3 * i + 1e-10;
-			const double slope = (f(i + di) - fi) / di;
-			double next = slope < 0 ? i - fi / slope : 0.5 * (lo + hi);
+				hi = vj;
+			// Steps limited to 4 V_T (as SPICE limits junction steps): the exponentials make
+			// full steps from below the root overshoot far.
+			double next = slope < 0 ? vj - std::clamp(fv / slope, -4 * kVt, 4 * kVt) : 0.5 * (lo + hi);
 			if (!(next > lo && next < hi))
 				next = 0.5 * (lo + hi);
-			const bool done = std::abs(next - i) < 1e-11;
-			i = next;
-			if (done || hi - lo < 1e-11)
+			const bool done = std::abs(next - vj) < pin1Tol;
+			vj = next;
+			if (done || hi - lo < pin1Tol)
 				break;
 		}
-		f(i);
+		double slope;
+		f(vj, slope);
+		pin1Vj = vj;
 		iVeg = iC;
 		iAcc = iD;
 		iE31 = iE;
